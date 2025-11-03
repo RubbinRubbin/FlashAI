@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p backend frontend uploads data)",
+      "Bash(npm install dotenv)",
+      "Bash(node backend/server.js)",
+      "Bash(timeout /t 2)",
+      "Bash(npm install openai)",
+      "Bash(dir:*)",
+      "Bash(npm run dev:*)",
+      "Bash(timeout /t 3)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
