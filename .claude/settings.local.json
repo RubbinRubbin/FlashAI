@@ -8,7 +8,12 @@
       "Bash(npm install openai)",
       "Bash(dir:*)",
       "Bash(npm run dev:*)",
-      "Bash(timeout /t 3)"
+      "Bash(timeout /t 3)",
+      "Bash(npm install)",
+      "Bash(where npm:*)",
+      "Bash(node --version:*)",
+      "Bash(npm --version:*)",
+      "Bash(git config:*)"
     ],
     "deny": [],
     "ask": []

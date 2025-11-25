@@ -134,7 +134,7 @@ ${section.text}`;
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [{
         role: 'system',
         content: 'JSON flashcard. Veloce.'
@@ -233,7 +233,7 @@ ${text}
 Genera almeno 5-10 flashcard (o più se il testo è lungo) che coprono tutti i concetti chiave. Rispondi SOLO con il JSON, nient'altro.`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [{
         role: 'system',
         content: 'Sei un assistente esperto nella creazione di flashcard educative. Rispondi SEMPRE e SOLO con JSON valido, senza testo aggiuntivo.'
@@ -349,7 +349,7 @@ ${chunk}`;
 
       try {
         const response = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: 'gpt-4o',
           messages: [{
             role: 'system',
             content: 'Genera flashcard JSON.'
