@@ -309,9 +309,9 @@ async function generateFlashcardsFast(text, progressCallback = null, shouldCance
       throw new Error('OPENAI_API_KEY non configurata');
     }
 
-    // Batch PICCOLI e VELOCI - genera più flashcard totali
-    // ~3000 caratteri per chunk = tanti batch veloci
-    const chunkSize = 3000;
+    // Chunk GRANDI per GPT-4o - massima qualità e contesto
+    // ~15000 caratteri per chunk = ~4400 token, meno batch, più coerenza
+    const chunkSize = 15000;
     const chunks = [];
     for (let i = 0; i < text.length; i += chunkSize) {
       chunks.push(text.substring(i, i + chunkSize));
@@ -329,22 +329,28 @@ async function generateFlashcardsFast(text, progressCallback = null, shouldCance
       }
 
       const chunk = chunks[i];
-      // ~15-25 flashcard per batch (veloce e affidabile)
-      const targetCount = Math.min(Math.floor(chunk.length / 150), 25);
+      // ~100 flashcard per batch con GPT-4o (massima copertura)
+      // Usa divisore più piccolo per garantire più flashcard
+      const targetCount = Math.min(Math.floor(chunk.length / 120), 120);
 
       console.log(`📝 Batch ${i + 1}/${chunks.length}: target ~${targetCount} flashcard`);
 
-      // Prompt ultra-conciso
-      const prompt = `Genera ${targetCount} flashcard dal testo.
+      // Prompt dettagliato per chunk grandi - ITALIANO
+      const prompt = `Analizza il seguente testo e genera ESATTAMENTE ${targetCount} flashcard educative a risposta multipla IN ITALIANO.
 
-REGOLE:
-- 4 opzioni (1 corretta)
-- Spiegazione breve
-- Domande difficili su concetti chiave
+REGOLE OBBLIGATORIE:
+1. LINGUA: Tutte le domande, opzioni e spiegazioni DEVONO essere in ITALIANO
+2. QUANTITÀ: Genera ESATTAMENTE ${targetCount} flashcard (non meno!)
+3. COPERTURA: Copri TUTTI i concetti chiave, algoritmi, definizioni e dettagli tecnici presenti nel testo
+4. OPZIONI: 4 opzioni per domanda (1 corretta, 3 plausibili ma errate)
+5. VARIETÀ: Varia tipologie - definizioni, applicazioni, complessità, confronti, esempi
+6. DETTAGLIO: Spiegazione dettagliata della risposta corretta in italiano
+7. PROGRESSIONE: Domande progressive da concetti base a dettagli avanzati
 
-JSON: {"flashcards":[{"question":"...","options":["A","B","C","D"],"correctAnswer":0,"explanation":"..."}]}
+FORMATO JSON (esempio):
+{"flashcards":[{"question":"Cos'è un albero binario?","options":["Un albero con al massimo 2 figli","Un albero con 3 figli","Un grafo ciclico","Una lista concatenata"],"correctAnswer":0,"explanation":"Un albero binario è una struttura dati dove ogni nodo ha al massimo due figli..."}]}
 
-TESTO:
+TESTO DA ANALIZZARE:
 ${chunk}`;
 
       try {
@@ -352,13 +358,13 @@ ${chunk}`;
           model: 'gpt-4o',
           messages: [{
             role: 'system',
-            content: 'Genera flashcard JSON.'
+            content: 'Sei un esperto educatore italiano che crea flashcard tecniche dettagliate IN ITALIANO. Analizza il testo in profondità e genera il numero esatto di flashcard richiesto, tutte in lingua italiana. Copri ogni concetto, definizione, algoritmo e dettaglio presente nel testo. Rispondi SOLO con JSON valido.'
           }, {
             role: 'user',
             content: prompt
           }],
-          temperature: 0.5,
-          max_tokens: 2500,
+          temperature: 0.7,
+          max_tokens: 8000,
           response_format: { type: "json_object" }
         });
 
