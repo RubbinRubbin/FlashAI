@@ -1,5 +1,5 @@
 # FlashAI - AI-Powered Flashcard Generator
-
+Ciao
 Applicazione web intelligente per generare flashcard a risposta multipla da qualsiasi documento.
 
 ## Caratteristiche
