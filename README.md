@@ -1,15 +1,14 @@
 # FlashAI - AI-Powered Flashcard Generator
-Ciao
 Applicazione web intelligente per generare flashcard a risposta multipla da qualsiasi documento.
 
 ## Caratteristiche
 
-- 📄 Upload di file (PDF, TXT, DOCX, MD)
-- 🤖 Analisi AI precisa con Claude (Anthropic)
-- 📚 Gestione workspace per organizzare per argomenti
-- ❓ Generazione automatica domande a risposta multipla
-- 💾 Salvataggio e recupero flashcard
-- 🎨 Interfaccia moderna e intuitiva
+-  Upload di file (PDF, TXT, DOCX, MD)
+-  Analisi AI precisa con Claude (Anthropic)
+-  Gestione workspace per organizzare per argomenti
+-  Generazione automatica domande a risposta multipla
+-  Salvataggio e recupero flashcard
+-  Interfaccia moderna e intuitiva
 
 ## Installazione
 
