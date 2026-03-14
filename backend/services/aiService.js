@@ -295,9 +295,79 @@ Genera almeno 5-10 flashcard (o più se il testo è lungo) che coprono tutti i c
   }
 }
 
+// --- Configurazione (sovrascrivibile via .env) ---
+const CONFIG = {
+  model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  chunkSize: parseInt(process.env.CHUNK_SIZE) || 5000,
+  maxFlashcardsPerChunk: parseInt(process.env.MAX_FLASHCARDS_PER_CHUNK) || 15,
+  concurrency: parseInt(process.env.PARALLEL_CONCURRENCY) || 5,
+  temperature: parseFloat(process.env.AI_TEMPERATURE) || 0.4,
+  chunkOverlap: 200,
+};
+
 /**
- * Genera flashcard in modo veloce con possibilità di interruzione
- * Divide il documento in chunk e genera in batch
+ * Divide il testo in chunk rispettando i confini dei paragrafi
+ */
+function splitIntoChunks(text, targetSize, overlap) {
+  const paragraphs = text.split(/\n\n+/);
+  const chunks = [];
+  let current = '';
+
+  for (const para of paragraphs) {
+    if (current.length + para.length > targetSize && current.length > 0) {
+      chunks.push(current.trim());
+      // Overlap: prendi la fine del chunk precedente come inizio del prossimo
+      const overlapText = current.slice(-overlap);
+      current = overlapText + '\n\n' + para;
+    } else {
+      current += (current ? '\n\n' : '') + para;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
+}
+
+/**
+ * Deduplicazione flashcard tramite Jaccard similarity sulle parole della domanda
+ */
+function deduplicateFlashcards(flashcards) {
+  const threshold = 0.7;
+
+  function getWords(text) {
+    return new Set(text.toLowerCase().replace(/[^\w\sàèéìòùáéíóú]/g, '').split(/\s+/).filter(w => w.length > 2));
+  }
+
+  function jaccardSimilarity(setA, setB) {
+    const intersection = new Set([...setA].filter(x => setB.has(x)));
+    const union = new Set([...setA, ...setB]);
+    return union.size === 0 ? 0 : intersection.size / union.size;
+  }
+
+  const kept = [];
+  const questionWords = [];
+
+  for (const card of flashcards) {
+    const words = getWords(card.question);
+    let isDuplicate = false;
+
+    for (const existingWords of questionWords) {
+      if (jaccardSimilarity(words, existingWords) > threshold) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      kept.push(card);
+      questionWords.push(words);
+    }
+  }
+
+  return kept;
+}
+
+/**
+ * Genera flashcard in modo veloce con processing parallelo e deduplicazione
  * @param {string} text - Il testo completo del documento
  * @param {Function} progressCallback - Callback per aggiornamenti (include flashcards parziali)
  * @param {Function} shouldCancel - Funzione che ritorna true se cancellato
@@ -309,111 +379,119 @@ async function generateFlashcardsFast(text, progressCallback = null, shouldCance
       throw new Error('OPENAI_API_KEY non configurata');
     }
 
-    // Chunk GRANDI per GPT-4o - massima qualità e contesto
-    // ~15000 caratteri per chunk = ~4400 token, meno batch, più coerenza
-    const chunkSize = 15000;
-    const chunks = [];
-    for (let i = 0; i < text.length; i += chunkSize) {
-      chunks.push(text.substring(i, i + chunkSize));
-    }
+    const { model, chunkSize, maxFlashcardsPerChunk, concurrency, temperature, chunkOverlap } = CONFIG;
 
+    // Chunking intelligente per paragrafi con overlap
+    const chunks = splitIntoChunks(text, chunkSize, chunkOverlap);
     const allFlashcards = [];
+    let completedBatches = 0;
+    let cancelled = false;
 
-    console.log(`🚀 Generazione veloce: ${chunks.length} batch da processare`);
+    console.log(`🚀 Generazione: ${chunks.length} batch, ${concurrency} paralleli, modello: ${model}`);
 
-    for (let i = 0; i < chunks.length; i++) {
-      // Check se cancellato
-      if (shouldCancel && shouldCancel()) {
-        console.log(`⏸️ Generazione interrotta dopo ${i} batch. Flashcards salvate: ${allFlashcards.length}`);
-        break;
-      }
+    // Funzione per processare un singolo chunk
+    async function processChunk(chunk, index) {
+      const targetCount = Math.max(5, Math.min(Math.floor(chunk.length / 500), maxFlashcardsPerChunk));
 
-      const chunk = chunks[i];
-      // ~100 flashcard per batch con GPT-4o (massima copertura)
-      // Usa divisore più piccolo per garantire più flashcard
-      const targetCount = Math.min(Math.floor(chunk.length / 120), 120);
+      const prompt = `Analizza il testo e genera circa ${targetCount} flashcard a risposta multipla IN ITALIANO.
 
-      console.log(`📝 Batch ${i + 1}/${chunks.length}: target ~${targetCount} flashcard`);
+REGOLE:
+- 4 opzioni per domanda (1 corretta, 3 plausibili ma errate)
+- Spiegazione concisa della risposta corretta
+- Varia difficoltà: facile (definizioni), medio (applicazioni), difficile (analisi/confronti)
+- Ogni flashcard deve testare un concetto DIVERSO
+- Se il testo non contiene abbastanza concetti, genera MENO flashcard
 
-      // Prompt dettagliato per chunk grandi - ITALIANO
-      const prompt = `Analizza il seguente testo e genera ESATTAMENTE ${targetCount} flashcard educative a risposta multipla IN ITALIANO.
+FORMATO JSON:
+{"flashcards":[{"question":"...","options":["A","B","C","D"],"correctAnswer":0,"explanation":"...","difficulty":"easy|medium|hard"}]}
 
-REGOLE OBBLIGATORIE:
-1. LINGUA: Tutte le domande, opzioni e spiegazioni DEVONO essere in ITALIANO
-2. QUANTITÀ: Genera ESATTAMENTE ${targetCount} flashcard (non meno!)
-3. COPERTURA: Copri TUTTI i concetti chiave, algoritmi, definizioni e dettagli tecnici presenti nel testo
-4. OPZIONI: 4 opzioni per domanda (1 corretta, 3 plausibili ma errate)
-5. VARIETÀ: Varia tipologie - definizioni, applicazioni, complessità, confronti, esempi
-6. DETTAGLIO: Spiegazione dettagliata della risposta corretta in italiano
-7. PROGRESSIONE: Domande progressive da concetti base a dettagli avanzati
-
-FORMATO JSON (esempio):
-{"flashcards":[{"question":"Cos'è un albero binario?","options":["Un albero con al massimo 2 figli","Un albero con 3 figli","Un grafo ciclico","Una lista concatenata"],"correctAnswer":0,"explanation":"Un albero binario è una struttura dati dove ogni nodo ha al massimo due figli..."}]}
-
-TESTO DA ANALIZZARE:
+TESTO:
 ${chunk}`;
 
-      try {
-        const response = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [{
-            role: 'system',
-            content: 'Sei un esperto educatore italiano che crea flashcard tecniche dettagliate IN ITALIANO. Analizza il testo in profondità e genera il numero esatto di flashcard richiesto, tutte in lingua italiana. Copri ogni concetto, definizione, algoritmo e dettaglio presente nel testo. Rispondi SOLO con JSON valido.'
-          }, {
-            role: 'user',
-            content: prompt
-          }],
-          temperature: 0.7,
-          max_tokens: 16000,
-          response_format: { type: "json_object" }
-        });
+      const response = await openai.chat.completions.create({
+        model,
+        messages: [{
+          role: 'system',
+          content: 'Genera flashcard educative in italiano. Rispondi SOLO con JSON valido.'
+        }, {
+          role: 'user',
+          content: prompt
+        }],
+        temperature,
+        max_tokens: 4000,
+        response_format: { type: "json_object" }
+      });
 
-        const responseText = response.choices[0].message.content;
+      const parsed = JSON.parse(response.choices[0].message.content);
+      let flashcards = parsed.flashcards || parsed.cards || [];
 
-        // Con response_format JSON, il contenuto è già JSON valido
+      // Valida struttura
+      flashcards = flashcards.filter(card =>
+        card.question &&
+        Array.isArray(card.options) &&
+        card.options.length === 4 &&
+        typeof card.correctAnswer === 'number' &&
+        card.correctAnswer >= 0 &&
+        card.correctAnswer <= 3 &&
+        card.explanation
+      );
+
+      return flashcards;
+    }
+
+    // Processing parallelo con pool di worker
+    let nextIndex = 0;
+
+    async function worker() {
+      while (nextIndex < chunks.length && !cancelled) {
+        if (shouldCancel && shouldCancel()) {
+          cancelled = true;
+          break;
+        }
+
+        const idx = nextIndex++;
         try {
-          const parsedResponse = JSON.parse(responseText);
-          let flashcards = parsedResponse.flashcards || parsedResponse.cards || [];
-
-          // Valida
-          flashcards = flashcards.filter(card =>
-            card.question &&
-            Array.isArray(card.options) &&
-            card.options.length === 4 &&
-            typeof card.correctAnswer === 'number' &&
-            card.correctAnswer >= 0 &&
-            card.correctAnswer <= 3 &&
-            card.explanation
-          );
+          const flashcards = await processChunk(chunks[idx], idx);
 
           if (flashcards.length > 0) {
             allFlashcards.push(...flashcards);
-            console.log(`  ✅ +${flashcards.length} flashcard (totale: ${allFlashcards.length})`);
-
-            // Notifica progresso con flashcards parziali
-            if (progressCallback) {
-              progressCallback({
-                currentBatch: i + 1,
-                totalBatches: chunks.length,
-                flashcardsGenerated: allFlashcards.length,
-                flashcards: [...allFlashcards] // Copia delle flashcard generate finora
-              });
-            }
-          } else {
-            console.warn(`⚠️ Batch ${i + 1}: nessuna flashcard valida generata`);
+            console.log(`  ✅ Batch ${idx + 1}: +${flashcards.length} flashcard (totale: ${allFlashcards.length})`);
           }
-        } catch (parseError) {
-          console.error(`⚠️ Errore parsing JSON batch ${i + 1}:`, parseError.message);
-          console.log('Risposta ricevuta:', responseText.substring(0, 500));
+        } catch (error) {
+          console.error(`⚠️ Errore batch ${idx + 1}:`, error.message);
         }
-      } catch (error) {
-        console.error(`⚠️ Errore batch ${i + 1}:`, error.message);
-        // Continua con il prossimo batch
+
+        completedBatches++;
+
+        // Notifica progresso
+        if (progressCallback) {
+          progressCallback({
+            currentBatch: completedBatches,
+            totalBatches: chunks.length,
+            flashcardsGenerated: allFlashcards.length,
+            flashcards: [...allFlashcards]
+          });
+        }
       }
     }
 
-    console.log(`✅ Completato! Totale: ${allFlashcards.length} flashcard`);
-    return allFlashcards;
+    // Lancia N worker paralleli
+    const workers = Array.from({ length: Math.min(concurrency, chunks.length) }, () => worker());
+    await Promise.all(workers);
+
+    if (cancelled) {
+      console.log(`⏸️ Interrotto dopo ${completedBatches} batch. Flashcards: ${allFlashcards.length}`);
+    }
+
+    // Deduplicazione
+    const before = allFlashcards.length;
+    const deduplicated = deduplicateFlashcards(allFlashcards);
+    if (before !== deduplicated.length) {
+      console.log(`🔄 Deduplicazione: ${before} → ${deduplicated.length} flashcard (-${before - deduplicated.length} duplicati)`);
+    }
+
+    console.log(`✅ Completato! Totale: ${deduplicated.length} flashcard`);
+    return deduplicated;
 
   } catch (error) {
     console.error('Error in fast generation:', error);
