@@ -239,6 +239,132 @@ app.post('/api/workspaces/:id/upload/cancel', (req, res) => {
   res.json({ success: true });
 });
 
+// Cross-deduplication: rimuove flashcard nuove troppo simili a quelle esistenti
+function crossDeduplicateFlashcards(newCards, existingCards) {
+  const threshold = 0.7;
+
+  function getWords(text) {
+    return new Set(text.toLowerCase().replace(/[^\w\sàèéìòùáéíóú]/g, '').split(/\s+/).filter(w => w.length > 2));
+  }
+
+  function jaccardSimilarity(setA, setB) {
+    const intersection = new Set([...setA].filter(x => setB.has(x)));
+    const union = new Set([...setA, ...setB]);
+    return union.size === 0 ? 0 : intersection.size / union.size;
+  }
+
+  const existingWords = existingCards.map(c => getWords(c.question));
+
+  return newCards.filter(card => {
+    const words = getWords(card.question);
+    return !existingWords.some(ew => jaccardSimilarity(words, ew) > threshold);
+  });
+}
+
+// Regenerate flashcards from saved document text
+app.post('/api/workspaces/:id/regenerate', async (req, res) => {
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
+
+  try {
+    const { id } = req.params;
+    const workspaces = await readWorkspaces();
+    const workspace = workspaces.find(w => w.id === id);
+
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace non trovato' });
+    }
+
+    if (!workspace.documentText) {
+      return res.status(400).json({ error: 'Nessun documento salvato. Carica un documento prima.' });
+    }
+
+    // Initialize progress tracking
+    const startTime = new Date();
+    uploadProgress.set(id, {
+      active: true,
+      currentBatch: 0,
+      totalBatches: 1,
+      flashcardsGenerated: 0,
+      startTime: startTime,
+      cancelled: false,
+      status: 'processing'
+    });
+
+    console.log('🔄 Rigenerazione flashcard dal testo salvato...');
+
+    let partialFlashcards = [];
+
+    const generatedFlashcards = await aiService.generateFlashcardsFast(
+      workspace.documentText,
+      (progress) => {
+        partialFlashcards = progress.flashcards || [];
+        uploadProgress.set(id, {
+          active: true,
+          currentBatch: progress.currentBatch,
+          totalBatches: progress.totalBatches,
+          flashcardsGenerated: progress.flashcardsGenerated,
+          startTime: startTime,
+          cancelled: uploadProgress.get(id)?.cancelled || false,
+          status: 'processing'
+        });
+      },
+      () => uploadProgress.get(id)?.cancelled === true,
+      { temperature: 0.6 } // Temperatura più alta per generare flashcard diverse
+    );
+
+    const flashcardsToProcess = generatedFlashcards.length > 0 ? generatedFlashcards : partialFlashcards;
+
+    // Cross-deduplicazione contro flashcard esistenti
+    const existingFlashcards = (await readFlashcards()).filter(f => f.workspaceId === id);
+    const uniqueNew = crossDeduplicateFlashcards(flashcardsToProcess, existingFlashcards);
+
+    console.log(`🔄 Cross-deduplicazione: ${flashcardsToProcess.length} → ${uniqueNew.length} nuove uniche`);
+
+    if (uniqueNew.length === 0) {
+      uploadProgress.set(id, { active: false, status: 'completed', flashcardsGenerated: 0, startTime });
+      return res.json({ success: true, flashcardsGenerated: 0, flashcards: [], message: 'Tutte le flashcard generate erano duplicate.' });
+    }
+
+    // Save appended flashcards
+    const flashcards = await readFlashcards();
+    const newFlashcards = uniqueNew.map(fc => ({
+      id: uuidv4(),
+      workspaceId: id,
+      question: fc.question,
+      options: fc.options,
+      correctAnswer: fc.correctAnswer,
+      explanation: fc.explanation,
+      createdAt: new Date().toISOString()
+    }));
+
+    flashcards.push(...newFlashcards);
+    await writeFlashcards(flashcards);
+
+    // Mark as completed
+    const wasCancelled = uploadProgress.get(id)?.cancelled === true;
+    uploadProgress.set(id, {
+      active: false,
+      currentBatch: uploadProgress.get(id)?.totalBatches || 1,
+      totalBatches: uploadProgress.get(id)?.totalBatches || 1,
+      flashcardsGenerated: newFlashcards.length,
+      startTime: startTime,
+      status: wasCancelled ? 'cancelled' : 'completed'
+    });
+
+    res.json({
+      success: true,
+      flashcardsGenerated: newFlashcards.length,
+      flashcards: newFlashcards
+    });
+
+  } catch (error) {
+    console.error('Error regenerating flashcards:', error);
+    uploadProgress.delete(req.params.id);
+    res.status(500).json({ error: 'Errore nella rigenerazione', details: error.message });
+  }
+});
+
 // Upload file and generate flashcards
 app.post('/api/workspaces/:id/upload', upload.single('file'), async (req, res) => {
   // Timeout esteso per documenti grandi (30 minuti)
@@ -271,6 +397,9 @@ app.post('/api/workspaces/:id/upload', upload.single('file'), async (req, res) =
     }
 
     console.log(`📄 Documento: ${text.length} caratteri`);
+
+    // Salva il testo estratto nel workspace per rigenerazione futura
+    workspace.documentText = text;
 
     // Initialize progress tracking
     const startTime = new Date();

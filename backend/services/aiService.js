@@ -373,13 +373,14 @@ function deduplicateFlashcards(flashcards) {
  * @param {Function} shouldCancel - Funzione che ritorna true se cancellato
  * @returns {Promise<Array>} Array di flashcard generate
  */
-async function generateFlashcardsFast(text, progressCallback = null, shouldCancel = null) {
+async function generateFlashcardsFast(text, progressCallback = null, shouldCancel = null, options = {}) {
   try {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY non configurata');
     }
 
     const { model, chunkSize, maxFlashcardsPerChunk, concurrency, temperature, chunkOverlap } = CONFIG;
+    const effectiveTemperature = options.temperature || temperature;
 
     // Chunking intelligente per paragrafi con overlap
     const chunks = splitIntoChunks(text, chunkSize, chunkOverlap);
@@ -417,7 +418,7 @@ ${chunk}`;
           role: 'user',
           content: prompt
         }],
-        temperature,
+        temperature: effectiveTemperature,
         max_tokens: 4000,
         response_format: { type: "json_object" }
       });

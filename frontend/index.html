@@ -49,106 +49,138 @@
 
                 <!-- Workspace View -->
                 <div id="workspaceView" class="workspace-view" style="display: none;">
-                    <!-- Workspace Header -->
+                    <!-- Workspace Header with Management Toggle -->
                     <div class="workspace-header">
                         <div class="workspace-info">
                             <h2 id="workspaceName">Workspace</h2>
                             <p id="workspaceDescription" class="workspace-description"></p>
                         </div>
+                        <button class="btn-icon management-toggle" id="managementToggleBtn" title="Gestione">&#9881;</button>
                     </div>
 
                     <!-- Hidden file input -->
                     <input type="file" id="fileInput" accept=".pdf,.txt,.docx,.doc,.md" hidden>
 
-                    <!-- Workspace Hub Dashboard -->
-                    <div class="workspace-hub" id="workspaceHub">
-
-                        <!-- Performance Stats -->
-                        <div id="workspacePerformanceStats" class="hub-performance" style="display: none;">
-                            <div class="hub-performance-stats">
-                                <div class="stat-item stat-correct">
-                                    <span class="stat-label">Corrette</span>
-                                    <span id="workspaceCorrectCount">0</span>
-                                </div>
-                                <div class="stat-item stat-incorrect">
-                                    <span class="stat-label">Sbagliate</span>
-                                    <span id="workspaceIncorrectCount">0</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">Rimanenti</span>
-                                    <span id="workspaceRemainingCount">0</span>
-                                </div>
-                            </div>
-                            <button class="btn btn-primary btn-continue-study" id="continueStudyBtn" onclick="continueStudy()">
-                                <span class="icon">&#9654;</span> Continua Studio
+                    <!-- Management Panel (collapsible) -->
+                    <div class="management-panel" id="managementPanel" style="display: none;">
+                        <div class="management-panel-grid">
+                            <button class="management-item" id="uploadDocumentBtn">
+                                <span class="management-icon">&#128196;</span>
+                                <span>Carica Documento</span>
+                            </button>
+                            <button class="management-item" id="viewFlashcardsBtn" style="display: none;">
+                                <span class="management-icon">&#128203;</span>
+                                <span>Visualizza Flashcard</span>
+                            </button>
+                            <button class="management-item" id="regenerateFlashcardsBtn" style="display: none;">
+                                <span class="management-icon">&#128260;</span>
+                                <span>Genera Altre</span>
+                            </button>
+                            <button class="management-item" id="createFlashcardHubBtn">
+                                <span class="management-icon">&#10133;</span>
+                                <span>Crea Flashcard</span>
+                            </button>
+                            <button class="management-item" id="restartStudyBtn" style="display: none;">
+                                <span class="management-icon">&#8635;</span>
+                                <span>Ricomincia</span>
+                            </button>
+                            <button class="management-item" id="editWorkspaceBtn">
+                                <span class="management-icon">&#9998;</span>
+                                <span>Modifica Workspace</span>
+                            </button>
+                            <button class="management-item" id="deleteAllFlashcardsBtn" style="display: none;">
+                                <span class="management-icon">&#128465;</span>
+                                <span>Elimina Flashcard</span>
+                            </button>
+                            <button class="management-item management-item-danger" id="deleteWorkspaceBtn">
+                                <span class="management-icon">&#128465;</span>
+                                <span>Elimina Workspace</span>
                             </button>
                         </div>
+                    </div>
 
-                        <!-- STUDIO Section -->
-                        <div class="hub-section" id="hubStudioSection" style="display: none;">
-                            <h3 class="hub-section-title">Studio</h3>
-                            <div class="hub-section-grid">
-                                <button class="hub-card hub-card-primary" id="studyModeBtn">
-                                    <span class="hub-card-icon">&#127919;</span>
-                                    <span class="hub-card-label">Inizia Studio</span>
-                                    <span class="hub-card-desc">Studia le flashcard con feedback immediato</span>
-                                </button>
-                                <button class="hub-card" id="quizModeBtn">
-                                    <span class="hub-card-icon">&#9201;</span>
-                                    <span class="hub-card-label">Simulazione Quiz</span>
-                                    <span class="hub-card-desc">Quiz a tempo con punteggio finale</span>
-                                </button>
-                                <button class="hub-card" id="restartStudyBtn">
-                                    <span class="hub-card-icon">&#8635;</span>
-                                    <span class="hub-card-label">Ricomincia</span>
-                                    <span class="hub-card-desc">Resetta i progressi e ricomincia</span>
-                                </button>
+                    <!-- Main Action Buttons -->
+                    <div class="main-actions" id="mainActions" style="display: none;">
+                        <button class="btn btn-large btn-primary main-action-btn" id="studyModeBtn">
+                            <span class="icon">&#127891;</span> Studia
+                        </button>
+                        <button class="btn btn-large btn-secondary main-action-btn" id="quizModeBtn">
+                            <span class="icon">&#9201;</span> Quiz
+                        </button>
+                    </div>
+
+                    <!-- Statistics Panel -->
+                    <div class="stats-panel" id="statsPanel" style="display: none;">
+                        <!-- Panoramica -->
+                        <div class="stats-section">
+                            <h3 class="stats-section-title">Panoramica</h3>
+                            <div class="stats-grid">
+                                <div class="stat-card">
+                                    <span class="stat-card-value" id="statTotalStudyTime">0h 0m</span>
+                                    <span class="stat-card-label">Tempo Studio</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-card-value" id="statTotalQuizTime">0h 0m</span>
+                                    <span class="stat-card-label">Tempo Quiz</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-card-value" id="statTotalSessions">0</span>
+                                    <span class="stat-card-label">Sessioni</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-card-value" id="statStreak">0</span>
+                                    <span class="stat-card-label">Streak (giorni)</span>
+                                </div>
                             </div>
                         </div>
-
-                        <!-- GESTIONE Section -->
-                        <div class="hub-section">
-                            <h3 class="hub-section-title">Gestione</h3>
-                            <div class="hub-section-grid">
-                                <button class="hub-card" id="uploadDocumentBtn">
-                                    <span class="hub-card-icon">&#128196;</span>
-                                    <span class="hub-card-label">Carica Documento</span>
-                                    <span class="hub-card-desc">PDF, TXT, DOCX o MD</span>
-                                </button>
-                                <button class="hub-card" id="viewFlashcardsBtn" style="display: none;">
-                                    <span class="hub-card-icon">&#128203;</span>
-                                    <span class="hub-card-label">Visualizza Flashcard</span>
-                                    <span class="hub-card-desc">Sfoglia e modifica le flashcard</span>
-                                </button>
-                                <button class="hub-card" id="regenerateFlashcardsBtn" style="display: none;">
-                                    <span class="hub-card-icon">&#128260;</span>
-                                    <span class="hub-card-label">Genera Altre</span>
-                                    <span class="hub-card-desc">Genera nuove flashcard dal documento</span>
-                                </button>
-                                <button class="hub-card" id="createFlashcardHubBtn">
-                                    <span class="hub-card-icon">&#10133;</span>
-                                    <span class="hub-card-label">Crea Flashcard</span>
-                                    <span class="hub-card-desc">Aggiungi manualmente una flashcard</span>
-                                </button>
+                        <!-- Rendimento -->
+                        <div class="stats-section">
+                            <h3 class="stats-section-title">Rendimento</h3>
+                            <div class="stats-grid">
+                                <div class="stat-card stat-card-success">
+                                    <span class="stat-card-value" id="statCorrectTotal">0</span>
+                                    <span class="stat-card-label">Corrette</span>
+                                </div>
+                                <div class="stat-card stat-card-danger">
+                                    <span class="stat-card-value" id="statIncorrectTotal">0</span>
+                                    <span class="stat-card-label">Sbagliate</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-card-value" id="statAccuracy">0%</span>
+                                    <span class="stat-card-label">Precisione</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-card-value" id="statImprovement">&mdash;</span>
+                                    <span class="stat-card-label">Miglioramento</span>
+                                </div>
+                                <div class="stat-card stat-card-success">
+                                    <span class="stat-card-value" id="statMastered">0</span>
+                                    <span class="stat-card-label">Padroneggiate</span>
+                                </div>
+                                <div class="stat-card stat-card-danger">
+                                    <span class="stat-card-value" id="statCritical">0</span>
+                                    <span class="stat-card-label">Critiche</span>
+                                </div>
                             </div>
                         </div>
-
-                        <!-- WORKSPACE Section -->
-                        <div class="hub-section">
-                            <h3 class="hub-section-title">Workspace</h3>
-                            <div class="hub-section-grid hub-section-grid-small">
-                                <button class="hub-card hub-card-small" id="editWorkspaceBtn">
-                                    <span class="hub-card-icon">&#9998;</span>
-                                    <span class="hub-card-label">Modifica Workspace</span>
-                                </button>
-                                <button class="hub-card hub-card-small hub-card-danger" id="deleteAllFlashcardsBtn" style="display: none;">
-                                    <span class="hub-card-icon">&#128465;</span>
-                                    <span class="hub-card-label">Elimina Flashcard</span>
-                                </button>
-                                <button class="hub-card hub-card-small hub-card-danger" id="deleteWorkspaceBtn">
-                                    <span class="hub-card-icon">&#128465;</span>
-                                    <span class="hub-card-label">Elimina Workspace</span>
-                                </button>
+                        <!-- Stima Preparazione -->
+                        <div class="stats-section">
+                            <h3 class="stats-section-title">Preparazione Esame</h3>
+                            <div class="exam-readiness">
+                                <div class="exam-readiness-bar">
+                                    <div class="exam-readiness-fill" id="statExamFill"></div>
+                                </div>
+                                <div class="exam-readiness-info">
+                                    <span class="exam-readiness-percent" id="statExamPercent">0%</span>
+                                    <span class="exam-readiness-label" id="statExamLabel">Inizio</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Quiz Recenti -->
+                        <div class="stats-section">
+                            <h3 class="stats-section-title">Quiz Recenti</h3>
+                            <div class="quiz-history" id="statQuizHistory">
+                                <p class="stats-empty">Nessun quiz completato</p>
                             </div>
                         </div>
                     </div>
@@ -177,7 +209,7 @@
                         <div id="documentContent" class="document-content"></div>
                     </div>
 
-                    <!-- Flashcards Section -->
+                    <!-- Flashcards Section (hidden by default) -->
                     <div id="flashcardsSection" class="flashcards-section" style="display: none;">
                         <div class="section-header">
                             <h3>Flashcard</h3>
@@ -192,18 +224,44 @@
                     </div>
                 </div>
 
-                <!-- Study Mode View -->
+                <!-- Study Mode View (shared by study and quiz) -->
                 <div id="studyModeView" class="study-mode-view" style="display: none;">
-                    <div class="study-header">
-                        <button class="btn btn-secondary" id="exitStudyBtn">
-                            <span class="icon">&larr;</span> Esci dallo Studio
-                        </button>
-                        <div class="study-progress">
-                            <span id="quizTimer" style="display: none; margin-right: 20px; color: var(--danger); font-weight: bold;">&#9201; <span id="quizTimeRemaining">00:00</span></span>
-                            <span id="studyProgress">0 / 0</span>
+                    <!-- Row 1: Progress bar + Exit button -->
+                    <div class="study-top-bar">
+                        <div class="study-progress-section">
+                            <!-- Progress Bar - Study Mode -->
+                            <div class="progress-bar-container" id="studyProgressBar">
+                                <div class="progress-bar-header">
+                                    <span class="progress-text">Progresso</span>
+                                    <span class="progress-numbers"><span id="progressCompleted">0</span> / <span id="progressTotal">0</span></span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-bar-fill" id="progressBarFill"></div>
+                                </div>
+                            </div>
+                            <!-- Progress Bar - Quiz Mode -->
+                            <div class="progress-bar-container" id="quizProgressBar" style="display: none;">
+                                <div class="progress-bar-header">
+                                    <span class="progress-text">Progresso Quiz</span>
+                                    <span class="progress-numbers">
+                                        <span id="quizTimer" style="display: none; margin-right: 12px; color: var(--danger); font-weight: bold;">&#9201; <span id="quizTimeRemaining">00:00</span></span>
+                                        <span id="quizProgressCompleted">0</span> / <span id="quizProgressTotal">0</span>
+                                    </span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-bar-fill" id="quizProgressBarFill"></div>
+                                </div>
+                            </div>
                         </div>
+                        <button class="btn btn-secondary btn-exit-study" id="exitStudyBtn" title="Esci">&times;</button>
                     </div>
 
+                    <!-- Row 2: Study card -->
+                    <div class="study-card-container">
+                        <div class="study-card" id="studyCard"></div>
+                    </div>
+
+                    <!-- Row 3: Score stats -->
                     <div class="performance-stats" id="studyPerformanceStats">
                         <div class="stat-item stat-correct">
                             <span class="stat-label">Corrette</span>
@@ -219,55 +277,21 @@
                         </div>
                     </div>
 
-                    <!-- Progress Bar - Study Mode -->
-                    <div class="progress-bar-container" id="studyProgressBar">
-                        <div class="progress-bar-header">
-                            <span class="progress-text">Progresso</span>
-                            <span class="progress-numbers"><span id="progressCompleted">0</span> / <span id="progressTotal">0</span></span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-bar-fill" id="progressBarFill"></div>
-                        </div>
-                    </div>
-
-                    <!-- Progress Bar - Quiz Mode -->
-                    <div class="progress-bar-container" id="quizProgressBar" style="display: none;">
-                        <div class="progress-bar-header">
-                            <span class="progress-text">Progresso Quiz</span>
-                            <span class="progress-numbers"><span id="quizProgressCompleted">0</span> / <span id="quizProgressTotal">0</span></span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-bar-fill" id="quizProgressBarFill"></div>
-                        </div>
-                    </div>
-
-                    <div class="study-controls">
-                        <button class="btn btn-secondary" id="shuffleBtn" onclick="shuffleFlashcards()">
-                            Mescola
+                    <!-- Row 4: Navigation with controls integrated -->
+                    <div class="study-navigation-bar">
+                        <button class="btn btn-secondary btn-nav" id="prevCardBtn">
+                            <span class="icon">&larr;</span>
                         </button>
-                        <button class="btn btn-secondary" id="viewIncorrectBtn" onclick="viewIncorrectFlashcards()">
-                            Vedi Sbagliate (<span id="incorrectCountBadge">0</span>)
-                        </button>
-                        <button class="btn btn-secondary" id="viewAllBtn" onclick="viewAllFlashcards()" style="display: none;">
-                            Mostra Tutte
-                        </button>
-                        <button class="btn btn-secondary" id="restartQuizBtn" onclick="restartQuiz()" style="display: none;">
-                            Ricomincia Quiz
-                        </button>
-                    </div>
-
-                    <div class="study-card-container">
-                        <div class="study-card" id="studyCard">
-                            <!-- Study card content will be inserted here -->
+                        <div class="study-nav-controls">
+                            <button class="btn btn-secondary btn-sm" id="shuffleBtn" onclick="shuffleFlashcards()">Mescola</button>
+                            <button class="btn btn-secondary btn-sm" id="viewIncorrectBtn" onclick="viewIncorrectFlashcards()">
+                                Sbagliate (<span id="incorrectCountBadge">0</span>)
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="viewAllBtn" onclick="viewAllFlashcards()" style="display: none;">Mostra Tutte</button>
+                            <button class="btn btn-secondary btn-sm" id="restartQuizBtn" onclick="restartQuiz()" style="display: none;">Ricomincia</button>
                         </div>
-                    </div>
-
-                    <div class="study-navigation">
-                        <button class="btn btn-secondary" id="prevCardBtn">
-                            <span class="icon">&larr;</span> Precedente
-                        </button>
-                        <button class="btn btn-secondary" id="nextCardBtn">
-                            Successiva <span class="icon">&rarr;</span>
+                        <button class="btn btn-secondary btn-nav" id="nextCardBtn">
+                            <span class="icon">&rarr;</span>
                         </button>
                     </div>
                 </div>

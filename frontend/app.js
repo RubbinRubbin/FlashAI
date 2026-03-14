@@ -18,7 +18,9 @@ const state = {
         flashcards: [],
         correctAnswers: new Set(),
         incorrectAnswers: new Set(),
-        lastIncorrectReview: null
+        viewingIncorrect: false,
+        canAdvance: false,
+        sessionStartTime: null
     },
     quizMode: {
         active: false,
@@ -26,12 +28,20 @@ const state = {
         startTime: null,
         endTime: null,
         timerInterval: null,
-        answers: [] // Salva tutte le risposte per mostrarle alla fine
+        answers: []
     },
     performance: {
         correct: [],
         incorrect: [],
-        correctFirstAttempt: [] // Flashcard corrette al primo tentativo - non riproporle
+        correctFirstAttempt: []
+    },
+    srs: {},
+    stats: {
+        studySessions: [],
+        quizSessions: [],
+        cardHistory: {},
+        totalStudyTimeMs: 0,
+        totalQuizTimeMs: 0
     }
 };
 
@@ -55,6 +65,9 @@ function initializeEventListeners() {
     document.getElementById('newWorkspaceBtn').addEventListener('click', () => openWorkspaceModal(false));
     document.getElementById('editWorkspaceBtn').addEventListener('click', () => openWorkspaceModal(true));
     document.getElementById('deleteWorkspaceBtn').addEventListener('click', deleteCurrentWorkspace);
+
+    // Management panel toggle
+    document.getElementById('managementToggleBtn').addEventListener('click', toggleManagementPanel);
 
     // Modal
     document.getElementById('closeModalBtn').addEventListener('click', closeWorkspaceModal);
@@ -102,7 +115,10 @@ function initializeEventListeners() {
     });
 }
 
-// Sidebar Toggle
+// ===================================
+// SIDEBAR
+// ===================================
+
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarBackdrop').classList.toggle('active');
@@ -113,7 +129,19 @@ function closeSidebar() {
     document.getElementById('sidebarBackdrop').classList.remove('active');
 }
 
-// API Calls
+// ===================================
+// MANAGEMENT PANEL
+// ===================================
+
+function toggleManagementPanel() {
+    const panel = document.getElementById('managementPanel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+// ===================================
+// API CALLS
+// ===================================
+
 async function apiCall(endpoint, options = {}) {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -137,7 +165,10 @@ async function apiCall(endpoint, options = {}) {
     }
 }
 
-// Workspace Management
+// ===================================
+// WORKSPACE MANAGEMENT
+// ===================================
+
 async function loadWorkspaces() {
     try {
         state.workspaces = await apiCall('/workspaces');
@@ -176,9 +207,11 @@ async function selectWorkspace(workspaceId) {
     closeSidebar();
     await loadFlashcards(workspaceId);
     loadPerformance();
+    loadSRS();
+    loadStats();
     showWorkspaceView();
     renderWorkspaceList();
-    startIncorrectReviewTimer();
+    updateStatsPanel();
 }
 
 function openWorkspaceModal(isEdit) {
@@ -217,7 +250,6 @@ async function saveWorkspace() {
 
     try {
         if (state.isEditMode && state.currentWorkspace) {
-            // Update existing workspace
             const updated = await apiCall(`/workspaces/${state.currentWorkspace.id}`, {
                 method: 'PUT',
                 body: JSON.stringify({ name, description })
@@ -230,7 +262,6 @@ async function saveWorkspace() {
             showToast('Workspace aggiornato!', 'success');
             showWorkspaceView();
         } else {
-            // Create new workspace
             const newWorkspace = await apiCall('/workspaces', {
                 method: 'POST',
                 body: JSON.stringify({ name, description })
@@ -261,37 +292,31 @@ async function deleteCurrentWorkspace() {
     try {
         const workspaceId = state.currentWorkspace.id;
 
-        await apiCall(`/workspaces/${workspaceId}`, {
-            method: 'DELETE'
-        });
+        await apiCall(`/workspaces/${workspaceId}`, { method: 'DELETE' });
 
-        // Clean up localStorage performance data
         localStorage.removeItem(`performance_${workspaceId}`);
+        localStorage.removeItem(`srs_${workspaceId}`);
+        localStorage.removeItem(`stats_${workspaceId}`);
 
         state.workspaces = state.workspaces.filter(ws => ws.id !== workspaceId);
         state.currentWorkspace = null;
         state.currentFlashcards = [];
-        state.performance = {
-            correct: [],
-            incorrect: [],
-            correctFirstAttempt: []
-        };
+        state.performance = { correct: [], incorrect: [], correctFirstAttempt: [] };
+        state.srs = {};
+        state.stats = { studySessions: [], quizSessions: [], cardHistory: {}, totalStudyTimeMs: 0, totalQuizTimeMs: 0 };
 
         renderWorkspaceList();
-
-        if (state.workspaces.length === 0) {
-            showWelcomeScreen();
-        } else {
-            showWelcomeScreen();
-        }
-
+        showWelcomeScreen();
         showToast('Workspace eliminato', 'success');
     } catch (error) {
         showToast(error.message, 'error');
     }
 }
 
-// Flashcard Management
+// ===================================
+// FLASHCARD MANAGEMENT
+// ===================================
+
 async function loadFlashcards(workspaceId) {
     try {
         state.currentFlashcards = await apiCall(`/workspaces/${workspaceId}/flashcards`);
@@ -304,38 +329,34 @@ async function loadFlashcards(workspaceId) {
 function renderFlashcards() {
     const listEl = document.getElementById('flashcardsList');
     const countEl = document.getElementById('flashcardCount');
-    const studyBtn = document.getElementById('studyModeBtn');
     const regenerateBtn = document.getElementById('regenerateFlashcardsBtn');
     const restartBtn = document.getElementById('restartStudyBtn');
     const viewFlashcardsBtn = document.getElementById('viewFlashcardsBtn');
-    const quizModeBtn = document.getElementById('quizModeBtn');
     const deleteAllBtn = document.getElementById('deleteAllFlashcardsBtn');
-    const flashcardsSection = document.getElementById('flashcardsSection');
+    const mainActions = document.getElementById('mainActions');
+    const statsPanel = document.getElementById('statsPanel');
 
     countEl.textContent = `${state.currentFlashcards.length} flashcard`;
     const hasFlashcards = state.currentFlashcards.length > 0;
 
-    studyBtn.style.display = hasFlashcards ? 'flex' : 'none';
+    // Show/hide management items that need flashcards
     regenerateBtn.style.display = hasFlashcards ? 'flex' : 'none';
     restartBtn.style.display = hasFlashcards ? 'flex' : 'none';
     viewFlashcardsBtn.style.display = hasFlashcards ? 'flex' : 'none';
-    quizModeBtn.style.display = hasFlashcards ? 'flex' : 'none';
     deleteAllBtn.style.display = hasFlashcards ? 'flex' : 'none';
 
-    // Show/hide hub Studio section
-    const hubStudioSection = document.getElementById('hubStudioSection');
-    if (hubStudioSection) hubStudioSection.style.display = hasFlashcards ? 'block' : 'none';
+    // Show/hide main action buttons
+    if (mainActions) mainActions.style.display = hasFlashcards ? 'flex' : 'none';
 
-    // Show flashcards section if there are flashcards
-    if (hasFlashcards) {
-        flashcardsSection.style.display = 'block';
-    }
+    // Show/hide stats panel
+    if (statsPanel) statsPanel.style.display = hasFlashcards ? 'block' : 'none';
+
+    // Flashcards section stays hidden by default (user toggles via management panel)
 
     updatePerformanceStats();
-    updateWorkspacePerformanceStats();
 
     if (state.currentFlashcards.length === 0) {
-        listEl.innerHTML = '<div class="empty-state"><p>📝 Nessuna flashcard ancora. Carica un documento per iniziare!</p></div>';
+        listEl.innerHTML = '<div class="empty-state"><p>Nessuna flashcard ancora. Carica un documento per iniziare!</p></div>';
         return;
     }
 
@@ -344,8 +365,8 @@ function renderFlashcards() {
             <div class="flashcard-header">
                 <div class="flashcard-question">${escapeHtml(card.question)}</div>
                 <div class="flashcard-actions">
-                    <button class="flashcard-edit" onclick="editFlashcard('${card.id}')" title="Modifica">✏️</button>
-                    <button class="flashcard-delete" onclick="deleteFlashcard('${card.id}')" title="Elimina">🗑️</button>
+                    <button class="flashcard-edit" onclick="editFlashcard('${card.id}')" title="Modifica">&#9998;</button>
+                    <button class="flashcard-delete" onclick="deleteFlashcard('${card.id}')" title="Elimina">&#128465;</button>
                 </div>
             </div>
             <div class="flashcard-options">
@@ -357,7 +378,7 @@ function renderFlashcards() {
                 `).join('')}
             </div>
             <div class="flashcard-explanation" id="explanation-${card.id}">
-                <strong>💡 Spiegazione:</strong> ${escapeHtml(card.explanation)}
+                <strong>Spiegazione:</strong> ${escapeHtml(card.explanation)}
             </div>
         </div>
     `).join('');
@@ -371,54 +392,37 @@ function selectAnswer(flashcardId, optionIndex) {
     const options = flashcardEl.querySelectorAll('.option');
     const explanationEl = document.getElementById(`explanation-${flashcardId}`);
 
-    // Check if already answered
     const alreadyAnswered = Array.from(options).some(opt =>
         opt.classList.contains('correct') || opt.classList.contains('incorrect')
     );
 
-    // Remove previous selections
     options.forEach(opt => {
         opt.classList.remove('selected', 'correct', 'incorrect');
     });
 
-    // Mark selected option
     options[optionIndex].classList.add('selected');
 
-    // Show if correct or incorrect
     const isCorrect = optionIndex === card.correctAnswer;
 
     if (isCorrect) {
         options[optionIndex].classList.add('correct');
-        if (!alreadyAnswered) {
-            trackAnswer(flashcardId, true);
-        }
+        if (!alreadyAnswered) trackAnswer(flashcardId, true);
     } else {
         options[optionIndex].classList.add('incorrect');
         options[card.correctAnswer].classList.add('correct');
-        if (!alreadyAnswered) {
-            trackAnswer(flashcardId, false);
-        }
+        if (!alreadyAnswered) trackAnswer(flashcardId, false);
     }
 
-    // Show explanation
     explanationEl.classList.add('show');
 }
 
 function trackAnswer(flashcardId, isCorrect) {
     if (isCorrect) {
-        state.performance.correct.push({
-            id: flashcardId,
-            timestamp: new Date()
-        });
-        // Rimuovi dalle sbagliate se era presente
+        state.performance.correct.push({ id: flashcardId, timestamp: new Date() });
         state.performance.incorrect = state.performance.incorrect.filter(item => item.id !== flashcardId);
     } else {
-        // Aggiungi solo se non è già nelle sbagliate
         if (!state.performance.incorrect.some(item => item.id === flashcardId)) {
-            state.performance.incorrect.push({
-                id: flashcardId,
-                timestamp: new Date()
-            });
+            state.performance.incorrect.push({ id: flashcardId, timestamp: new Date() });
         }
     }
 
@@ -427,7 +431,6 @@ function trackAnswer(flashcardId, isCorrect) {
 }
 
 function updatePerformanceStats() {
-    // Aggiorna solo se in modalità studio
     if (!state.studyMode.active) return;
 
     const correctCount = document.getElementById('studyCorrectCount');
@@ -440,35 +443,7 @@ function updatePerformanceStats() {
 
     correctCount.textContent = correct;
     incorrectCount.textContent = incorrect;
-
-    if (total > 0) {
-        const accuracy = ((correct / total) * 100).toFixed(0);
-        accuracyPercent.textContent = `${accuracy}%`;
-    } else {
-        accuracyPercent.textContent = '0%';
-    }
-}
-
-function updateWorkspacePerformanceStats() {
-    const statsEl = document.getElementById('workspacePerformanceStats');
-    const correctCountEl = document.getElementById('workspaceCorrectCount');
-    const incorrectCountEl = document.getElementById('workspaceIncorrectCount');
-    const remainingCountEl = document.getElementById('workspaceRemainingCount');
-
-    const correct = state.performance.correct.length;
-    const incorrect = state.performance.incorrect.length;
-    const correctFirstAttempt = state.performance.correctFirstAttempt.length;
-    const total = state.currentFlashcards.length;
-    const remaining = total - correctFirstAttempt;
-
-    if (total > 0 && (correct > 0 || incorrect > 0)) {
-        statsEl.style.display = 'flex';
-        correctCountEl.textContent = correct;
-        incorrectCountEl.textContent = incorrect;
-        remainingCountEl.textContent = remaining;
-    } else {
-        statsEl.style.display = 'none';
-    }
+    accuracyPercent.textContent = total > 0 ? `${((correct / total) * 100).toFixed(0)}%` : '0%';
 }
 
 function savePerformance() {
@@ -483,23 +458,19 @@ function loadPerformance() {
         if (saved) {
             state.performance = JSON.parse(saved);
             updatePerformanceStats();
+        } else {
+            state.performance = { correct: [], incorrect: [], correctFirstAttempt: [] };
         }
     }
 }
 
 async function deleteFlashcard(flashcardId) {
-    if (!confirm('Sei sicuro di voler eliminare questa flashcard?')) {
-        return;
-    }
+    if (!confirm('Sei sicuro di voler eliminare questa flashcard?')) return;
 
     try {
-        await apiCall(`/flashcards/${flashcardId}`, {
-            method: 'DELETE'
-        });
-
+        await apiCall(`/flashcards/${flashcardId}`, { method: 'DELETE' });
         state.currentFlashcards = state.currentFlashcards.filter(fc => fc.id !== flashcardId);
         renderFlashcards();
-
         showToast('Flashcard eliminata', 'success');
     } catch (error) {
         showToast(error.message, 'error');
@@ -508,29 +479,19 @@ async function deleteFlashcard(flashcardId) {
 
 async function deleteAllFlashcards() {
     if (!state.currentWorkspace) return;
-
     const count = state.currentFlashcards.length;
     if (count === 0) return;
 
-    if (!confirm(`Sei sicuro di voler eliminare tutte le ${count} flashcard? Questa azione non può essere annullata.`)) {
-        return;
-    }
+    if (!confirm(`Sei sicuro di voler eliminare tutte le ${count} flashcard?`)) return;
 
     try {
-        const result = await apiCall(`/workspaces/${state.currentWorkspace.id}/flashcards`, {
-            method: 'DELETE'
-        });
+        const result = await apiCall(`/workspaces/${state.currentWorkspace.id}/flashcards`, { method: 'DELETE' });
 
-        // Reset flashcards
         state.currentFlashcards = [];
-
-        // Reset performance data for this workspace
-        state.performance = {
-            correct: [],
-            incorrect: [],
-            correctFirstAttempt: []
-        };
+        state.performance = { correct: [], incorrect: [], correctFirstAttempt: [] };
+        state.srs = {};
         savePerformance();
+        saveSRS();
 
         renderFlashcards();
         showToast(`${result.deletedCount} flashcard eliminate`, 'success');
@@ -540,10 +501,8 @@ async function deleteAllFlashcards() {
 }
 
 function createNewFlashcard() {
-    // Resetta l'ID (segnala che stiamo creando una nuova flashcard)
     state.editingFlashcardId = null;
 
-    // Svuota il modal
     document.getElementById('editQuestionInput').value = '';
     document.getElementById('editOption0').value = '';
     document.getElementById('editOption1').value = '';
@@ -552,7 +511,6 @@ function createNewFlashcard() {
     document.getElementById('editCorrectAnswer').value = '0';
     document.getElementById('editExplanation').value = '';
 
-    // Mostra modal
     document.getElementById('editFlashcardModal').classList.add('show');
 }
 
@@ -560,10 +518,8 @@ function editFlashcard(flashcardId) {
     const card = state.currentFlashcards.find(fc => fc.id === flashcardId);
     if (!card) return;
 
-    // Salva l'ID per il salvataggio
     state.editingFlashcardId = flashcardId;
 
-    // Popola il modal
     document.getElementById('editQuestionInput').value = card.question;
     document.getElementById('editOption0').value = card.options[0];
     document.getElementById('editOption1').value = card.options[1];
@@ -572,15 +528,17 @@ function editFlashcard(flashcardId) {
     document.getElementById('editCorrectAnswer').value = card.correctAnswer;
     document.getElementById('editExplanation').value = card.explanation;
 
-    // Mostra modal
     document.getElementById('editFlashcardModal').classList.add('show');
 }
 
-// File Upload
+// ===================================
+// FLASHCARD VIEW TOGGLE
+// ===================================
+
 function toggleFlashcardsView() {
     const flashcardsSection = document.getElementById('flashcardsSection');
     const viewFlashcardsBtn = document.getElementById('viewFlashcardsBtn');
-    const label = viewFlashcardsBtn.querySelector('.hub-card-label');
+    const label = viewFlashcardsBtn.querySelector('span:last-child');
 
     if (flashcardsSection.style.display === 'none') {
         flashcardsSection.style.display = 'block';
@@ -591,11 +549,13 @@ function toggleFlashcardsView() {
     }
 }
 
+// ===================================
+// FILE UPLOAD
+// ===================================
+
 function handleFileSelect(e) {
     const files = e.target.files;
-    if (files.length > 0) {
-        uploadFile(files[0]);
-    }
+    if (files.length > 0) uploadFile(files[0]);
 }
 
 async function uploadFile(file) {
@@ -604,7 +564,6 @@ async function uploadFile(file) {
         return;
     }
 
-    // Validate file
     const allowedTypes = ['.pdf', '.txt', '.docx', '.doc', '.md'];
     const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
 
@@ -618,7 +577,6 @@ async function uploadFile(file) {
         return;
     }
 
-    // Show progress
     const uploadProgressEl = document.getElementById('uploadProgress');
     const progressFill = document.getElementById('progressFill');
     const uploadStatus = document.getElementById('uploadStatus');
@@ -627,7 +585,6 @@ async function uploadFile(file) {
     progressFill.style.width = '0%';
     uploadStatus.textContent = 'Caricamento file...';
 
-    // Initialize upload progress state
     state.uploadProgress.active = true;
     state.uploadProgress.startTime = new Date();
 
@@ -635,7 +592,6 @@ async function uploadFile(file) {
         const formData = new FormData();
         formData.append('file', file);
 
-        // Start progress polling
         const progressInterval = startProgressPolling();
 
         const response = await fetch(`${API_BASE}/workspaces/${state.currentWorkspace.id}/upload`, {
@@ -643,7 +599,6 @@ async function uploadFile(file) {
             body: formData
         });
 
-        // Stop progress polling
         clearInterval(progressInterval);
         state.uploadProgress.active = false;
 
@@ -654,142 +609,526 @@ async function uploadFile(file) {
 
         const result = await response.json();
 
-        // Check if was cancelled
         const finalProgress = await apiCall(`/workspaces/${state.currentWorkspace.id}/upload/progress`);
         const wasCancelled = finalProgress.status === 'cancelled';
 
         progressFill.style.width = '100%';
-        progressFill.style.background = wasCancelled ? '#f39c12' : 'var(--primary-color)';
 
         if (wasCancelled) {
-            uploadStatus.textContent = `⏸️ Interrotto - ${result.flashcardsGenerated} flashcard salvate`;
+            uploadStatus.textContent = `Interrotto - ${result.flashcardsGenerated} flashcard salvate`;
             showToast(`Generazione interrotta. ${result.flashcardsGenerated} flashcard salvate!`, 'warning');
         } else {
-            uploadStatus.textContent = `✅ Generati ${result.flashcardsGenerated} flashcard!`;
+            uploadStatus.textContent = `Generati ${result.flashcardsGenerated} flashcard!`;
             showToast(`${result.flashcardsGenerated} flashcard generate con successo!`, 'success');
         }
 
-        // Update flashcards - SEMPRE, anche se cancellato
         state.currentFlashcards = [...state.currentFlashcards, ...result.flashcards];
         renderFlashcards();
+        updateStatsPanel();
 
-        // Reset after 3 seconds
         setTimeout(() => {
             uploadProgressEl.style.display = 'none';
-            progressFill.style.background = 'var(--primary-color)';
             document.getElementById('fileInput').value = '';
         }, 3000);
 
     } catch (error) {
         console.error('Upload error:', error);
         state.uploadProgress.active = false;
-        uploadStatus.textContent = `❌ ${error.message}`;
+        uploadStatus.textContent = `Errore: ${error.message}`;
         progressFill.style.width = '100%';
-        progressFill.style.background = 'var(--danger-color)';
+        progressFill.style.background = 'var(--danger)';
 
         showToast(error.message, 'error');
 
         setTimeout(() => {
             uploadProgressEl.style.display = 'none';
-            progressFill.style.background = 'var(--primary-color)';
+            progressFill.style.background = '';
         }, 3000);
     }
 }
 
-// Study Mode
+// ===================================
+// REGENERATE FLASHCARDS (from saved text)
+// ===================================
+
+async function regenerateFlashcards() {
+    if (!state.currentWorkspace) return;
+
+    if (!confirm('Vuoi generare nuove flashcard dal documento caricato? Le nuove verranno aggiunte alle esistenti.')) return;
+
+    const workspaceId = state.currentWorkspace.id;
+
+    const uploadProgressEl = document.getElementById('uploadProgress');
+    const progressFill = document.getElementById('progressFill');
+    const uploadStatus = document.getElementById('uploadStatus');
+
+    uploadProgressEl.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressFill.style.background = '';
+    uploadStatus.textContent = 'Generazione nuove flashcard...';
+    state.uploadProgress.active = true;
+
+    const pollInterval = startProgressPolling();
+
+    try {
+        const response = await fetch(`${API_BASE}/workspaces/${workspaceId}/regenerate`, { method: 'POST' });
+        const result = await response.json();
+
+        clearInterval(pollInterval);
+        state.uploadProgress.active = false;
+
+        if (result.success) {
+            progressFill.style.width = '100%';
+            uploadStatus.textContent = `${result.flashcardsGenerated} nuove flashcard generate!`;
+
+            await loadFlashcards(workspaceId);
+            updateStatsPanel();
+            showToast(`${result.flashcardsGenerated} nuove flashcard generate!`, 'success');
+        } else {
+            uploadStatus.textContent = result.error || 'Errore nella rigenerazione';
+            showToast(result.error || 'Errore nella rigenerazione', 'error');
+        }
+
+        setTimeout(() => { uploadProgressEl.style.display = 'none'; }, 3000);
+    } catch (error) {
+        clearInterval(pollInterval);
+        state.uploadProgress.active = false;
+        uploadStatus.textContent = `Errore: ${error.message}`;
+        showToast('Errore nella rigenerazione: ' + error.message, 'error');
+        setTimeout(() => { uploadProgressEl.style.display = 'none'; }, 3000);
+    }
+}
+
+// ===================================
+// SM-2 SPACED REPETITION
+// ===================================
+
+function loadSRS() {
+    if (state.currentWorkspace) {
+        const saved = localStorage.getItem(`srs_${state.currentWorkspace.id}`);
+        state.srs = saved ? JSON.parse(saved) : {};
+    }
+}
+
+function saveSRS() {
+    if (state.currentWorkspace) {
+        localStorage.setItem(`srs_${state.currentWorkspace.id}`, JSON.stringify(state.srs));
+    }
+}
+
+function getSRSData(cardId) {
+    if (!state.srs[cardId]) {
+        state.srs[cardId] = {
+            easeFactor: 2.5,
+            interval: 0,
+            repetitions: 0,
+            nextReview: 0
+        };
+    }
+    return state.srs[cardId];
+}
+
+function updateSRS(cardId, quality) {
+    const data = getSRSData(cardId);
+
+    if (quality < 3) {
+        data.repetitions = 0;
+        data.interval = 0;
+    } else {
+        if (data.repetitions === 0) {
+            data.interval = 1;
+        } else if (data.repetitions === 1) {
+            data.interval = 6;
+        } else {
+            data.interval = Math.round(data.interval * data.easeFactor);
+        }
+        data.repetitions++;
+    }
+
+    data.easeFactor = Math.max(1.3, data.easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02)));
+    data.nextReview = Date.now() + (data.interval * 24 * 60 * 60 * 1000);
+
+    state.srs[cardId] = data;
+    saveSRS();
+}
+
+function isCardDueForReview(cardId) {
+    const data = getSRSData(cardId);
+    return data.nextReview <= Date.now();
+}
+
+function sortCardsByReviewPriority(cards) {
+    const now = Date.now();
+    return [...cards].sort((a, b) => {
+        const srsA = getSRSData(a.id);
+        const srsB = getSRSData(b.id);
+        const overdueA = now - srsA.nextReview;
+        const overdueB = now - srsB.nextReview;
+        return overdueB - overdueA;
+    });
+}
+
+function getNextReviewTime() {
+    let earliest = Infinity;
+    for (const fc of state.currentFlashcards) {
+        const data = getSRSData(fc.id);
+        if (data.nextReview > Date.now() && data.nextReview < earliest) {
+            earliest = data.nextReview;
+        }
+    }
+    return earliest === Infinity ? null : earliest;
+}
+
+function formatRelativeTime(timestamp) {
+    if (!timestamp) return 'mai';
+    const diff = timestamp - Date.now();
+    const hours = Math.round(diff / (1000 * 60 * 60));
+    if (hours < 1) return 'tra pochi minuti';
+    if (hours < 24) return `tra ${hours} ore`;
+    const days = Math.round(hours / 24);
+    return `tra ${days} giorn${days === 1 ? 'o' : 'i'}`;
+}
+
+// ===================================
+// STATISTICS
+// ===================================
+
+function loadStats() {
+    if (state.currentWorkspace) {
+        const saved = localStorage.getItem(`stats_${state.currentWorkspace.id}`);
+        if (saved) {
+            state.stats = JSON.parse(saved);
+        } else {
+            state.stats = { studySessions: [], quizSessions: [], cardHistory: {}, totalStudyTimeMs: 0, totalQuizTimeMs: 0 };
+        }
+    }
+}
+
+function saveStats() {
+    if (state.currentWorkspace) {
+        localStorage.setItem(`stats_${state.currentWorkspace.id}`, JSON.stringify(state.stats));
+    }
+}
+
+function recordStudySession(startTime, cardsStudied, correct, incorrect) {
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+    state.stats.studySessions.push({ startTime, endTime, cardsStudied, correctCount: correct, incorrectCount: incorrect });
+    state.stats.totalStudyTimeMs += duration;
+    saveStats();
+}
+
+function recordQuizSession(startTime, endTime, totalQuestions, correct, incorrect, unanswered, score) {
+    const duration = endTime - startTime;
+    state.stats.quizSessions.push({ startTime, endTime, totalQuestions, correct, incorrect, unanswered, score });
+    state.stats.totalQuizTimeMs += duration;
+    saveStats();
+}
+
+function recordCardAnswer(cardId, correct, mode) {
+    if (!state.stats.cardHistory[cardId]) {
+        state.stats.cardHistory[cardId] = [];
+    }
+    state.stats.cardHistory[cardId].push({ timestamp: Date.now(), correct, mode });
+    saveStats();
+}
+
+function calculateStreak() {
+    const allSessions = [
+        ...state.stats.studySessions.map(s => s.startTime),
+        ...state.stats.quizSessions.map(s => s.startTime)
+    ].sort((a, b) => b - a);
+
+    if (allSessions.length === 0) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const sessionDays = new Set();
+    allSessions.forEach(ts => {
+        const d = new Date(ts);
+        d.setHours(0, 0, 0, 0);
+        sessionDays.add(d.getTime());
+    });
+
+    let streak = 0;
+    let checkDate = new Date(today);
+
+    // Check if today or yesterday has a session
+    if (!sessionDays.has(checkDate.getTime())) {
+        checkDate.setDate(checkDate.getDate() - 1);
+        if (!sessionDays.has(checkDate.getTime())) return 0;
+    }
+
+    while (sessionDays.has(checkDate.getTime())) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+    }
+
+    return streak;
+}
+
+function calculateImprovement() {
+    const now = Date.now();
+    const oneWeek = 7 * 24 * 60 * 60 * 1000;
+
+    let recentCorrect = 0, recentTotal = 0;
+    let previousCorrect = 0, previousTotal = 0;
+
+    for (const cardId in state.stats.cardHistory) {
+        for (const entry of state.stats.cardHistory[cardId]) {
+            const age = now - entry.timestamp;
+            if (age < oneWeek) {
+                recentTotal++;
+                if (entry.correct) recentCorrect++;
+            } else if (age < 2 * oneWeek) {
+                previousTotal++;
+                if (entry.correct) previousCorrect++;
+            }
+        }
+    }
+
+    if (previousTotal === 0 || recentTotal === 0) return null;
+
+    const recentAccuracy = recentCorrect / recentTotal;
+    const previousAccuracy = previousCorrect / previousTotal;
+
+    return Math.round((recentAccuracy - previousAccuracy) * 100);
+}
+
+function calculateExamReadiness() {
+    const total = state.currentFlashcards.length;
+    if (total === 0) return 0;
+
+    // Mastered: SRS interval >= 21 days
+    let mastered = 0;
+    let studied = 0;
+    for (const fc of state.currentFlashcards) {
+        const data = getSRSData(fc.id);
+        if (data.interval >= 21) mastered++;
+        if (data.repetitions > 0) studied++;
+    }
+
+    const masteredWeight = mastered / total;
+    const coverageWeight = studied / total;
+
+    // Recent accuracy
+    const now = Date.now();
+    const oneWeek = 7 * 24 * 60 * 60 * 1000;
+    let recentCorrect = 0, recentTotal = 0;
+    for (const cardId in state.stats.cardHistory) {
+        for (const entry of state.stats.cardHistory[cardId]) {
+            if (now - entry.timestamp < oneWeek) {
+                recentTotal++;
+                if (entry.correct) recentCorrect++;
+            }
+        }
+    }
+    const accuracyWeight = recentTotal > 0 ? recentCorrect / recentTotal : 0;
+
+    // Consistency
+    const streak = calculateStreak();
+    const consistencyWeight = Math.min(1, streak / 7);
+
+    const readiness = (masteredWeight * 0.4 + accuracyWeight * 0.3 + coverageWeight * 0.2 + consistencyWeight * 0.1) * 100;
+    return Math.round(readiness);
+}
+
+function updateStatsPanel() {
+    const panel = document.getElementById('statsPanel');
+    if (!panel || state.currentFlashcards.length === 0) return;
+
+    // Panoramica
+    const studyHours = Math.floor(state.stats.totalStudyTimeMs / 3600000);
+    const studyMins = Math.floor((state.stats.totalStudyTimeMs % 3600000) / 60000);
+    document.getElementById('statTotalStudyTime').textContent = `${studyHours}h ${studyMins}m`;
+
+    const quizHours = Math.floor(state.stats.totalQuizTimeMs / 3600000);
+    const quizMins = Math.floor((state.stats.totalQuizTimeMs % 3600000) / 60000);
+    document.getElementById('statTotalQuizTime').textContent = `${quizHours}h ${quizMins}m`;
+
+    document.getElementById('statTotalSessions').textContent = state.stats.studySessions.length + state.stats.quizSessions.length;
+    document.getElementById('statStreak').textContent = calculateStreak();
+
+    // Rendimento
+    let totalCorrect = 0, totalIncorrect = 0;
+    for (const cardId in state.stats.cardHistory) {
+        for (const entry of state.stats.cardHistory[cardId]) {
+            if (entry.correct) totalCorrect++;
+            else totalIncorrect++;
+        }
+    }
+
+    document.getElementById('statCorrectTotal').textContent = totalCorrect;
+    document.getElementById('statIncorrectTotal').textContent = totalIncorrect;
+
+    const totalAnswers = totalCorrect + totalIncorrect;
+    document.getElementById('statAccuracy').textContent = totalAnswers > 0 ? `${Math.round((totalCorrect / totalAnswers) * 100)}%` : '0%';
+
+    const improvement = calculateImprovement();
+    const improvementEl = document.getElementById('statImprovement');
+    if (improvement !== null) {
+        improvementEl.textContent = `${improvement > 0 ? '+' : ''}${improvement}%`;
+        improvementEl.style.color = improvement >= 0 ? 'var(--success)' : 'var(--danger)';
+    } else {
+        improvementEl.textContent = '\u2014';
+        improvementEl.style.color = '';
+    }
+
+    // Mastered & Critical
+    let mastered = 0, critical = 0;
+    for (const fc of state.currentFlashcards) {
+        const data = getSRSData(fc.id);
+        if (data.interval >= 21) mastered++;
+
+        const history = state.stats.cardHistory[fc.id] || [];
+        const wrongCount = history.filter(h => !h.correct).length;
+        const lastCorrect = history.filter(h => h.correct).length > 0;
+        if (wrongCount > 2 && !lastCorrect) critical++;
+    }
+    document.getElementById('statMastered').textContent = mastered;
+    document.getElementById('statCritical').textContent = critical;
+
+    // Exam Readiness
+    const readiness = calculateExamReadiness();
+    document.getElementById('statExamPercent').textContent = `${readiness}%`;
+
+    const fillEl = document.getElementById('statExamFill');
+    fillEl.style.width = `${readiness}%`;
+    if (readiness < 30) {
+        fillEl.style.background = 'var(--danger)';
+    } else if (readiness < 70) {
+        fillEl.style.background = '#f39c12';
+    } else {
+        fillEl.style.background = 'var(--success)';
+    }
+
+    let label = 'Inizio';
+    if (readiness >= 85) label = 'Pronto!';
+    else if (readiness >= 70) label = 'Buono';
+    else if (readiness >= 50) label = 'Intermedio';
+    else if (readiness >= 30) label = 'Base';
+    document.getElementById('statExamLabel').textContent = label;
+
+    // Quiz History
+    const historyEl = document.getElementById('statQuizHistory');
+    const recentQuizzes = state.stats.quizSessions.slice(-5).reverse();
+
+    if (recentQuizzes.length === 0) {
+        historyEl.innerHTML = '<p class="stats-empty">Nessun quiz completato</p>';
+    } else {
+        historyEl.innerHTML = recentQuizzes.map(q => {
+            const date = new Date(q.startTime);
+            const dateStr = date.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+            const duration = Math.round((q.endTime - q.startTime) / 60000);
+            return `<div class="quiz-history-item">
+                <span class="quiz-history-date">${dateStr}</span>
+                <span>${duration}min</span>
+                <span>${q.totalQuestions} domande</span>
+                <span class="quiz-history-score" style="color: ${q.score >= 60 ? 'var(--success)' : 'var(--danger)'}">${q.score}%</span>
+            </div>`;
+        }).join('');
+    }
+}
+
+// ===================================
+// STUDY MODE
+// ===================================
+
 function continueStudy() {
-    // Semplicemente chiama enterStudyMode che già filtra le flashcard corrette al primo tentativo
     enterStudyMode();
 }
 
 function enterStudyMode() {
     if (state.currentFlashcards.length === 0) return;
 
-    // Filtra le flashcard: escludi quelle corrette al primo tentativo
-    const flashcardsToStudy = state.currentFlashcards.filter(fc =>
-        !state.performance.correctFirstAttempt.includes(fc.id)
-    );
+    // Filter cards due for review (SRS)
+    let flashcardsToStudy = state.currentFlashcards.filter(fc => isCardDueForReview(fc.id));
 
     if (flashcardsToStudy.length === 0) {
-        showToast('Hai già risposto correttamente a tutte le flashcard! Clicca "Ricomincia" per ripeterle.', 'info');
+        const nextReview = getNextReviewTime();
+        if (nextReview) {
+            showToast(`Nessuna flashcard da ripassare! Prossimo ripasso: ${formatRelativeTime(nextReview)}`, 'info');
+        } else {
+            showToast('Hai completato tutte le flashcard! Clicca "Ricomincia" nel menu gestione per ripeterle.', 'info');
+        }
         return;
     }
+
+    // Sort by review priority
+    flashcardsToStudy = sortCardsByReviewPriority(flashcardsToStudy);
 
     state.studyMode.active = true;
     state.studyMode.flashcards = flashcardsToStudy;
     state.studyMode.currentIndex = 0;
-    state.studyMode.viewingIncorrect = false; // Reset flag
-    state.studyMode.canAdvance = false; // Reset flag per Enter
+    state.studyMode.viewingIncorrect = false;
+    state.studyMode.canAdvance = false;
+    state.studyMode.sessionStartTime = Date.now();
 
     document.getElementById('workspaceView').style.display = 'none';
     document.getElementById('studyModeView').style.display = 'block';
 
-    // Mostra barra studio, nascondi barra quiz
+    // Show study progress bar, hide quiz
     document.getElementById('studyProgressBar').style.display = 'block';
     document.getElementById('quizProgressBar').style.display = 'none';
 
-    // Mostra statistiche in modalità studio normale
+    // Show performance stats
     document.getElementById('studyPerformanceStats').style.display = 'flex';
 
-    // Mostra pulsanti studio, nascondi pulsante quiz
+    // Show study controls, hide quiz controls
     document.getElementById('shuffleBtn').style.display = 'inline-flex';
     document.getElementById('viewIncorrectBtn').style.display = 'inline-flex';
     document.getElementById('restartQuizBtn').style.display = 'none';
-
-    // Nascondi pulsante "Mostra Tutte" all'inizio
     document.getElementById('viewAllBtn').style.display = 'none';
 
-    // Aggiungi listener per Enter
     document.addEventListener('keydown', handleStudyModeKeyPress);
 
     renderStudyCard();
     updateIncorrectBadge();
-    startIncorrectReviewTimer();
 }
 
 function exitStudyMode() {
-    stopIncorrectReviewTimer();
+    // Record study session
+    if (state.studyMode.sessionStartTime && !state.quizMode.active) {
+        const correct = state.performance.correct.length;
+        const incorrect = state.performance.incorrect.length;
+        recordStudySession(state.studyMode.sessionStartTime, state.studyMode.flashcards.length, correct, incorrect);
+    }
 
-    // Ferma timer quiz se attivo
+    // Stop quiz timer if active
     if (state.quizMode.active && state.quizMode.timerInterval) {
         clearInterval(state.quizMode.timerInterval);
         state.quizMode.timerInterval = null;
     }
 
-    // Nascondi timer quiz
+    // Hide quiz timer
     document.getElementById('quizTimer').style.display = 'none';
 
     state.studyMode.active = false;
     state.studyMode.currentIndex = 0;
     state.studyMode.canAdvance = false;
+    state.studyMode.sessionStartTime = null;
     state.quizMode.active = false;
 
-    // Rimuovi listener per Enter
     document.removeEventListener('keydown', handleStudyModeKeyPress);
 
     document.getElementById('studyModeView').style.display = 'none';
     document.getElementById('workspaceView').style.display = 'block';
+
+    updateStatsPanel();
 }
 
 function renderStudyCard() {
     const card = state.studyMode.flashcards[state.studyMode.currentIndex];
-    const progressEl = document.getElementById('studyProgress');
     const cardEl = document.getElementById('studyCard');
 
-    // Controlla se questa flashcard è stata sbagliata
     const isIncorrect = state.performance.incorrect.includes(card.id);
-
-    progressEl.textContent = `${state.studyMode.currentIndex + 1} / ${state.studyMode.flashcards.length}`;
 
     cardEl.innerHTML = `
         ${isIncorrect ? '<div class="incorrect-badge" title="Risposta sbagliata"></div>' : ''}
         <div class="study-card-actions">
-            <button class="btn-icon" onclick="editStudyFlashcard()" title="Modifica">
-                ✏️
-            </button>
-            <button class="btn-icon btn-danger" onclick="deleteStudyFlashcard()" title="Elimina">
-                🗑️
-            </button>
+            <button class="btn-icon" onclick="editStudyFlashcard()" title="Modifica">&#9998;</button>
+            <button class="btn-icon btn-danger" onclick="deleteStudyFlashcard()" title="Elimina">&#128465;</button>
         </div>
         <div class="study-question">${escapeHtml(card.question)}</div>
         <div class="flashcard-options">
@@ -801,18 +1140,14 @@ function renderStudyCard() {
             `).join('')}
         </div>
         <div class="flashcard-explanation" id="study-explanation">
-            <strong>💡 Spiegazione:</strong> ${escapeHtml(card.explanation)}
+            <strong>Spiegazione:</strong> ${escapeHtml(card.explanation)}
         </div>
     `;
 
-    // Update navigation buttons
     document.getElementById('prevCardBtn').disabled = state.studyMode.currentIndex === 0;
     document.getElementById('nextCardBtn').disabled = state.studyMode.currentIndex === state.studyMode.flashcards.length - 1;
 
-    // Update progress bar
     updateProgressBar();
-
-    // Reset canAdvance per la prossima domanda
     state.studyMode.canAdvance = false;
 }
 
@@ -822,12 +1157,10 @@ function updateProgressBar() {
     const percentage = (completed / total) * 100;
 
     if (state.quizMode.active) {
-        // Aggiorna barra quiz
         document.getElementById('quizProgressCompleted').textContent = completed;
         document.getElementById('quizProgressTotal').textContent = total;
         document.getElementById('quizProgressBarFill').style.width = `${percentage}%`;
     } else {
-        // Aggiorna barra studio normale
         document.getElementById('progressCompleted').textContent = completed;
         document.getElementById('progressTotal').textContent = total;
         document.getElementById('progressBarFill').style.width = `${percentage}%`;
@@ -840,112 +1173,106 @@ function selectStudyAnswer(optionIndex) {
     const options = cardEl.querySelectorAll('.option');
     const explanationEl = document.getElementById('study-explanation');
 
-    // In modalità quiz, controlla se già risposto tramite l'array delle risposte
+    // Quiz mode logic
     if (state.quizMode.active) {
         const alreadyAnswered = state.quizMode.answers.some(a => a.cardId === card.id);
         if (alreadyAnswered) return;
 
-        // Salva la risposta senza mostrare feedback
+        const isCorrect = optionIndex === card.correctAnswer;
+
         state.quizMode.answers.push({
             cardId: card.id,
             selectedAnswer: optionIndex,
             correctAnswer: card.correctAnswer,
-            isCorrect: optionIndex === card.correctAnswer
+            isCorrect
         });
 
-        // Marca solo come selected senza mostrare se è corretta
+        // Record for stats
+        recordCardAnswer(card.id, isCorrect, 'quiz');
+
         options.forEach(opt => opt.classList.remove('selected'));
         options[optionIndex].classList.add('selected');
 
-        // Abilita avanzamento automatico
         state.studyMode.canAdvance = true;
 
-        // Avanza automaticamente alla prossima domanda
         if (state.studyMode.currentIndex < state.studyMode.flashcards.length - 1) {
             setTimeout(() => navigateStudyCard(1), 300);
         } else {
-            // Se è l'ultima domanda del quiz, termina il quiz
             setTimeout(() => endQuiz(), 300);
         }
 
         return;
     }
 
-    // Modalità studio normale - mostra feedback
-    // Controlla se già risposto
+    // Study mode logic
     const alreadyAnswered = Array.from(options).some(opt =>
         opt.classList.contains('correct') || opt.classList.contains('incorrect')
     );
 
-    if (alreadyAnswered) return; // Non permettere di rispondere due volte
+    if (alreadyAnswered) return;
 
-    // Remove previous selections
     options.forEach(opt => {
         opt.classList.remove('selected', 'correct', 'incorrect');
     });
 
-    // Mark selected option
     options[optionIndex].classList.add('selected');
 
-    // Show if correct or incorrect
     const isCorrect = optionIndex === card.correctAnswer;
 
     if (isCorrect) {
         options[optionIndex].classList.add('correct');
 
-        // Aggiungi a corrette (se non già presente)
         if (!state.performance.correct.includes(card.id)) {
             state.performance.correct.push(card.id);
 
-            // Se è la prima volta che rispondi e hai risposto correttamente, segna come "corretta al primo tentativo"
             if (!state.performance.incorrect.includes(card.id) && !state.performance.correctFirstAttempt.includes(card.id)) {
                 state.performance.correctFirstAttempt.push(card.id);
             }
 
-            // Rimuovi da sbagliate se presente
             const incorrectIndex = state.performance.incorrect.indexOf(card.id);
             if (incorrectIndex > -1) {
                 state.performance.incorrect.splice(incorrectIndex, 1);
             }
         }
+
+        // SM-2: quality based on history
+        const wasIncorrect = state.performance.incorrect.includes(card.id);
+        updateSRS(card.id, wasIncorrect ? 3 : 5);
     } else {
         options[optionIndex].classList.add('incorrect');
         options[card.correctAnswer].classList.add('correct');
 
-        // Aggiungi a sbagliate (se non già presente)
         if (!state.performance.incorrect.includes(card.id)) {
             state.performance.incorrect.push(card.id);
 
-            // Rimuovi da "corrette al primo tentativo" se presente
             const firstAttemptIndex = state.performance.correctFirstAttempt.indexOf(card.id);
             if (firstAttemptIndex > -1) {
                 state.performance.correctFirstAttempt.splice(firstAttemptIndex, 1);
             }
 
-            // Rimuovi da corrette se presente
             const correctIndex = state.performance.correct.indexOf(card.id);
             if (correctIndex > -1) {
                 state.performance.correct.splice(correctIndex, 1);
             }
         }
+
+        // SM-2: wrong answer
+        updateSRS(card.id, 0);
     }
 
-    // Salva performance e aggiorna UI
+    // Record for stats
+    recordCardAnswer(card.id, isCorrect, 'study');
+
     savePerformance();
     updatePerformanceStats();
-    updateWorkspacePerformanceStats();
     updateIncorrectBadge();
 
-    // Show explanation
     explanationEl.classList.add('show');
-
-    // Abilita avanzamento automatico con Enter dopo aver risposto
     state.studyMode.canAdvance = true;
 }
 
 function navigateStudyCard(direction) {
     const newIndex = state.studyMode.currentIndex + direction;
-
     if (newIndex >= 0 && newIndex < state.studyMode.flashcards.length) {
         state.studyMode.currentIndex = newIndex;
         renderStudyCard();
@@ -953,33 +1280,29 @@ function navigateStudyCard(direction) {
 }
 
 function handleStudyModeKeyPress(e) {
-    // Solo se siamo in modalità studio
     if (!state.studyMode.active) return;
 
-    // Enter avanza alla prossima flashcard se hai già risposto
     if (e.key === 'Enter' && state.studyMode.canAdvance) {
         e.preventDefault();
-
-        // Avanza alla prossima flashcard se non è l'ultima
         if (state.studyMode.currentIndex < state.studyMode.flashcards.length - 1) {
             navigateStudyCard(1);
         }
     }
 
-    // Numeri 1-4 per selezionare risposte
     if (e.key >= '1' && e.key <= '4') {
         e.preventDefault();
         const optionIndex = parseInt(e.key) - 1;
         const card = state.studyMode.flashcards[state.studyMode.currentIndex];
-
-        // Seleziona solo se l'opzione esiste
         if (optionIndex < card.options.length) {
             selectStudyAnswer(optionIndex);
         }
     }
 }
 
-// Quiz Mode Functions
+// ===================================
+// QUIZ MODE
+// ===================================
+
 function openQuizModal() {
     if (state.currentFlashcards.length === 0) {
         showToast('Nessuna flashcard disponibile per il quiz', 'error');
@@ -1011,66 +1334,54 @@ function startQuizMode() {
         return;
     }
 
-    // Chiudi modal
     closeQuizModal();
 
-    // Seleziona domande casuali
     const shuffled = [...state.currentFlashcards].sort(() => Math.random() - 0.5);
     const selectedFlashcards = shuffled.slice(0, questionsCount);
 
-    // Inizializza quiz mode
     state.quizMode.active = true;
     state.quizMode.duration = duration;
     state.quizMode.startTime = Date.now();
     state.quizMode.endTime = Date.now() + (duration * 60 * 1000);
     state.quizMode.answers = [];
 
-    // Inizializza study mode con le domande selezionate
     state.studyMode.active = true;
     state.studyMode.flashcards = selectedFlashcards;
     state.studyMode.currentIndex = 0;
     state.studyMode.viewingIncorrect = false;
     state.studyMode.canAdvance = false;
+    state.studyMode.sessionStartTime = Date.now();
 
-    // Mostra vista studio
     document.getElementById('workspaceView').style.display = 'none';
     document.getElementById('studyModeView').style.display = 'block';
 
-    // Mostra barra quiz, nascondi barra studio
+    // Show quiz progress bar, hide study
     document.getElementById('studyProgressBar').style.display = 'none';
     document.getElementById('quizProgressBar').style.display = 'block';
 
-    // Nascondi statistiche in modalità quiz
+    // Hide performance stats in quiz mode
     document.getElementById('studyPerformanceStats').style.display = 'none';
 
-    // Nascondi tutti i pulsanti in modalità quiz
+    // Hide study controls, keep restartQuiz hidden until needed
     document.getElementById('shuffleBtn').style.display = 'none';
     document.getElementById('viewIncorrectBtn').style.display = 'none';
     document.getElementById('viewAllBtn').style.display = 'none';
     document.getElementById('restartQuizBtn').style.display = 'none';
 
-    // Mostra timer
+    // Show timer
     document.getElementById('quizTimer').style.display = 'inline';
 
-    // Avvia timer
     startQuizTimer();
-
-    // Aggiungi listener per Enter
     document.addEventListener('keydown', handleStudyModeKeyPress);
 
     renderStudyCard();
-    updatePerformanceStats();
-
     showToast(`Quiz avviato! ${questionsCount} domande in ${duration} minuti`, 'success');
 }
 
 function startQuizTimer() {
     updateQuizTimer();
-
     state.quizMode.timerInterval = setInterval(() => {
         updateQuizTimer();
-
-        // Controlla se il tempo è scaduto
         if (Date.now() >= state.quizMode.endTime) {
             endQuiz();
         }
@@ -1088,10 +1399,8 @@ function updateQuizTimer() {
     const minutes = Math.floor(remaining / 60000);
     const seconds = Math.floor((remaining % 60000) / 1000);
 
-    const display = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-    document.getElementById('quizTimeRemaining').textContent = display;
+    document.getElementById('quizTimeRemaining').textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-    // Cambia colore quando rimangono meno di 2 minuti
     const timerEl = document.getElementById('quizTimer');
     if (remaining < 120000) {
         timerEl.style.color = 'var(--danger)';
@@ -1100,68 +1409,146 @@ function updateQuizTimer() {
 }
 
 function endQuiz() {
-    // Ferma timer
     if (state.quizMode.timerInterval) {
         clearInterval(state.quizMode.timerInterval);
         state.quizMode.timerInterval = null;
     }
 
-    // Nascondi timer
     document.getElementById('quizTimer').style.display = 'none';
 
-    // Calcola punteggio dai risultati salvati
     const correctCount = state.quizMode.answers.filter(a => a.isCorrect).length;
-    const totalQuestions = state.quizMode.answers.length;
     const answeredCount = state.quizMode.answers.length;
-    const unansweredCount = state.studyMode.flashcards.length - answeredCount;
-    const percentage = totalQuestions > 0 ? Math.round((correctCount / state.studyMode.flashcards.length) * 100) : 0;
+    const totalQuestions = state.studyMode.flashcards.length;
+    const unansweredCount = totalQuestions - answeredCount;
+    const percentage = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
 
-    // Crea messaggio dettagliato dei risultati
+    // Record quiz session for stats
+    recordQuizSession(
+        state.quizMode.startTime,
+        Date.now(),
+        totalQuestions,
+        correctCount,
+        answeredCount - correctCount,
+        unansweredCount,
+        percentage
+    );
+
     let resultMessage = `Quiz Terminato!\n\n`;
     resultMessage += `Risposte Corrette: ${correctCount}\n`;
     resultMessage += `Risposte Sbagliate: ${answeredCount - correctCount}\n`;
     if (unansweredCount > 0) {
         resultMessage += `Domande Non Risposte: ${unansweredCount}\n`;
     }
-    resultMessage += `Totale Domande: ${state.studyMode.flashcards.length}\n\n`;
+    resultMessage += `Totale Domande: ${totalQuestions}\n\n`;
     resultMessage += `Punteggio Finale: ${percentage}%`;
 
-    // Mostra risultato con alert per essere più visibile
     alert(resultMessage);
 
-    // Mostra anche toast
-    showToast(`Quiz terminato! ${correctCount}/${state.studyMode.flashcards.length} corrette (${percentage}%)`,
+    showToast(`Quiz terminato! ${correctCount}/${totalQuestions} corrette (${percentage}%)`,
         percentage >= 60 ? 'success' : 'warning');
 
-    // Reset quiz mode
     state.quizMode.active = false;
     state.quizMode.answers = [];
 
-    // Esci dalla modalità studio
     exitStudyMode();
 }
 
 function restartQuiz() {
     if (!state.quizMode.active) return;
 
-    // Reset quiz
     state.studyMode.currentIndex = 0;
     state.quizMode.startTime = Date.now();
     state.quizMode.endTime = Date.now() + (state.quizMode.duration * 60 * 1000);
+    state.quizMode.answers = [];
 
-    // Reset timer
     if (state.quizMode.timerInterval) {
         clearInterval(state.quizMode.timerInterval);
     }
     startQuizTimer();
 
-    // Renderizza prima flashcard
     renderStudyCard();
-
     showToast('Quiz riavviato!', 'info');
 }
 
-// View Management
+// ===================================
+// STUDY ADVANCED FEATURES
+// ===================================
+
+function updateIncorrectBadge() {
+    const badge = document.getElementById('incorrectCountBadge');
+    if (badge) badge.textContent = state.performance.incorrect.length;
+}
+
+function shuffleFlashcards() {
+    if (!state.studyMode.active) return;
+
+    const flashcards = [...state.studyMode.flashcards];
+    for (let i = flashcards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [flashcards[i], flashcards[j]] = [flashcards[j], flashcards[i]];
+    }
+
+    state.studyMode.flashcards = flashcards;
+    state.studyMode.currentIndex = 0;
+    renderStudyCard();
+    showToast('Flashcard mescolate!', 'success');
+}
+
+function viewIncorrectFlashcards() {
+    if (!state.studyMode.active) return;
+
+    const incorrectFlashcards = state.currentFlashcards.filter(fc =>
+        state.performance.incorrect.includes(fc.id)
+    );
+
+    if (incorrectFlashcards.length === 0) {
+        showToast('Non hai ancora flashcard sbagliate!', 'info');
+        return;
+    }
+
+    state.studyMode.flashcards = incorrectFlashcards;
+    state.studyMode.currentIndex = 0;
+    state.studyMode.viewingIncorrect = true;
+    renderStudyCard();
+
+    document.getElementById('viewAllBtn').style.display = 'inline-flex';
+    showToast(`Mostrando ${incorrectFlashcards.length} flashcard sbagliate`, 'info');
+}
+
+function viewAllFlashcards() {
+    if (!state.studyMode.active) return;
+
+    // Show ALL cards regardless of SRS
+    state.studyMode.flashcards = sortCardsByReviewPriority(state.currentFlashcards);
+    state.studyMode.currentIndex = 0;
+    state.studyMode.viewingIncorrect = false;
+    renderStudyCard();
+
+    document.getElementById('viewAllBtn').style.display = 'none';
+    showToast(`Mostrando tutte le ${state.currentFlashcards.length} flashcard`, 'success');
+}
+
+function restartStudy() {
+    if (state.currentFlashcards.length === 0) return;
+
+    if (!confirm('Vuoi ricominciare da capo? Le statistiche e i progressi SRS verranno resettati.')) return;
+
+    state.performance = { correct: [], incorrect: [], correctFirstAttempt: [] };
+    state.srs = {};
+
+    savePerformance();
+    saveSRS();
+    updatePerformanceStats();
+    renderFlashcards();
+    updateStatsPanel();
+
+    showToast('Studio riavviato! Buona fortuna!', 'success');
+}
+
+// ===================================
+// VIEW MANAGEMENT
+// ===================================
+
 function showWelcomeScreen() {
     document.getElementById('welcomeScreen').style.display = 'flex';
     document.getElementById('workspaceView').style.display = 'none';
@@ -1171,13 +1558,19 @@ function showWorkspaceView() {
     document.getElementById('welcomeScreen').style.display = 'none';
     document.getElementById('workspaceView').style.display = 'block';
 
+    // Close management panel by default
+    document.getElementById('managementPanel').style.display = 'none';
+
     if (state.currentWorkspace) {
         document.getElementById('workspaceName').textContent = state.currentWorkspace.name;
         document.getElementById('workspaceDescription').textContent = state.currentWorkspace.description || 'Nessuna descrizione';
     }
 }
 
-// Utility Functions
+// ===================================
+// UTILITY FUNCTIONS
+// ===================================
+
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
     toast.textContent = message;
@@ -1195,21 +1588,23 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Progress Polling Functions
+// ===================================
+// PROGRESS POLLING
+// ===================================
+
 function startProgressPolling() {
     return setInterval(async () => {
         if (!state.currentWorkspace || !state.uploadProgress.active) return;
 
         try {
             const progress = await apiCall(`/workspaces/${state.currentWorkspace.id}/upload/progress`);
-
             if (progress.active) {
                 updateProgressUI(progress);
             }
         } catch (error) {
             console.error('Error polling progress:', error);
         }
-    }, 1000); // Poll every second
+    }, 1000);
 }
 
 function updateProgressUI(progress) {
@@ -1219,22 +1614,15 @@ function updateProgressUI(progress) {
     const progressFill = document.getElementById('progressFill');
     const uploadStatus = document.getElementById('uploadStatus');
 
-    // Calculate elapsed time
     const elapsed = new Date() - new Date(progress.startTime);
-    const elapsedSeconds = Math.floor(elapsed / 1000);
-    const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-    const elapsedSecondsRemainder = elapsedSeconds % 60;
 
-    // Update based on status
     if (progress.status === 'cancelled') {
         progressSection.textContent = `Interrotto`;
         progressFlashcards.textContent = `${progress.flashcardsGenerated} flashcard salvate`;
         progressFill.style.width = '100%';
-        progressFill.style.background = 'var(--warning-color)';
-        uploadStatus.textContent = `⏸️ Interrotto - ${progress.flashcardsGenerated} flashcard salvate`;
+        uploadStatus.textContent = `Interrotto - ${progress.flashcardsGenerated} flashcard salvate`;
         progressTime.textContent = '';
     } else if (progress.currentBatch > 0 && progress.totalBatches > 0) {
-        // Batch processing attivo - mostra countdown
         const percentage = (progress.currentBatch / progress.totalBatches) * 100;
 
         progressSection.textContent = `Batch ${progress.currentBatch}/${progress.totalBatches}`;
@@ -1242,7 +1630,6 @@ function updateProgressUI(progress) {
         progressFill.style.width = `${percentage}%`;
         uploadStatus.textContent = `Generando flashcard...`;
 
-        // Calcola tempo rimanente stimato (countdown)
         const avgTimePerBatch = elapsed / progress.currentBatch;
         const remainingBatches = progress.totalBatches - progress.currentBatch;
         const estimatedRemainingMs = avgTimePerBatch * remainingBatches;
@@ -1251,215 +1638,44 @@ function updateProgressUI(progress) {
             const estSeconds = Math.floor(estimatedRemainingMs / 1000);
             const estMinutes = Math.floor(estSeconds / 60);
             const estSecondsRemainder = estSeconds % 60;
-            progressTime.textContent = `⏳ Tempo rimanente: ~${estMinutes}m ${estSecondsRemainder < 10 ? '0' : ''}${estSecondsRemainder}s`;
+            progressTime.textContent = `Tempo rimanente: ~${estMinutes}m ${estSecondsRemainder < 10 ? '0' : ''}${estSecondsRemainder}s`;
         } else {
             progressTime.textContent = `Completamento in corso...`;
         }
     } else {
-        // Prima batch - AI sta analizzando, non abbiamo dati per stimare
         progressSection.textContent = `AI sta leggendo il documento...`;
         progressFlashcards.textContent = `Analisi in corso`;
         progressFill.style.width = '10%';
-        progressFill.style.transition = 'width 2s ease-in-out';
         uploadStatus.textContent = `Preparazione batch in corso...`;
         progressTime.textContent = `In attesa della prima risposta AI...`;
     }
 
-    // Update global state
-    state.uploadProgress = {
-        ...progress,
-        active: true
-    };
+    state.uploadProgress = { ...progress, active: true };
 }
 
 async function cancelUpload() {
     if (!state.currentWorkspace || !state.uploadProgress.active) return;
 
-    if (!confirm('Sei sicuro di voler fermare la generazione? Le flashcard già create verranno salvate.')) {
-        return;
-    }
+    if (!confirm('Sei sicuro di voler fermare la generazione? Le flashcard già create verranno salvate.')) return;
 
     try {
-        await apiCall(`/workspaces/${state.currentWorkspace.id}/upload/cancel`, {
-            method: 'POST'
-        });
-
+        await apiCall(`/workspaces/${state.currentWorkspace.id}/upload/cancel`, { method: 'POST' });
         state.uploadProgress.active = false;
-
         showToast('Generazione fermata', 'info');
     } catch (error) {
         showToast('Errore nel fermare la generazione', 'error');
     }
 }
 
-// Regenerate & Restart Functions
-async function regenerateFlashcards() {
-    if (!state.currentWorkspace || !state.currentWorkspace.lastUploadedFile) {
-        showToast('Nessun documento caricato da cui generare flashcard', 'error');
-        return;
-    }
-
-    if (!confirm('Vuoi generare nuove flashcard dal documento caricato? Questo può richiedere alcuni minuti.')) {
-        return;
-    }
-
-    showToast('Rigenerazione flashcard in corso... Controlla i log per il progresso!', 'info');
-    // La rigenerazione richiederà di ricaricare il file
-    // Per semplicità, mostra un messaggio all'utente
-    showToast('Per generare nuove flashcard, ricarica il documento', 'info');
-}
-
-function restartStudy() {
-    if (state.currentFlashcards.length === 0) return;
-
-    if (!confirm('Vuoi ricominciare da capo? Le statistiche attuali verranno mantenute.')) {
-        return;
-    }
-
-    // Resetta le statistiche solo per questa sessione
-    state.performance = {
-        correct: [],
-        incorrect: [],
-        correctFirstAttempt: [] // Reset anche le corrette al primo tentativo
-    };
-
-    savePerformance();
-    updatePerformanceStats();
-
-    // Ricarica le flashcard per resetare lo stato visivo
-    renderFlashcards();
-
-    showToast('Studio riavviato! Buona fortuna!', 'success');
-}
-
-// Sistema di Ripetizione Flashcard Sbagliate
-// Funzioni per modalità studio avanzate
-
-// Aggiorna badge delle flashcard sbagliate
-function updateIncorrectBadge() {
-    const badge = document.getElementById('incorrectCountBadge');
-    if (badge) {
-        badge.textContent = state.performance.incorrect.length;
-    }
-}
-
-// Mescola le flashcard in modo random
-function shuffleFlashcards() {
-    if (!state.studyMode.active) return;
-
-    const flashcards = [...state.studyMode.flashcards];
-
-    // Fisher-Yates shuffle algorithm
-    for (let i = flashcards.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [flashcards[i], flashcards[j]] = [flashcards[j], flashcards[i]];
-    }
-
-    state.studyMode.flashcards = flashcards;
-    state.studyMode.currentIndex = 0;
-    renderStudyCard();
-
-    showToast('Flashcard mescolate!', 'success');
-}
-
-// Visualizza solo le flashcard sbagliate
-function viewIncorrectFlashcards() {
-    if (!state.studyMode.active) return;
-
-    const incorrectFlashcards = state.currentFlashcards.filter(fc =>
-        state.performance.incorrect.includes(fc.id)
-    );
-
-    if (incorrectFlashcards.length === 0) {
-        showToast('Non hai ancora flashcard sbagliate!', 'info');
-        return;
-    }
-
-    state.studyMode.flashcards = incorrectFlashcards;
-    state.studyMode.currentIndex = 0;
-    state.studyMode.viewingIncorrect = true; // Flag per sapere se stai guardando solo sbagliate
-    renderStudyCard();
-
-    // Mostra pulsante "Mostra Tutte"
-    document.getElementById('viewAllBtn').style.display = 'inline-block';
-
-    showToast(`Mostrando ${incorrectFlashcards.length} flashcard sbagliate`, 'info');
-}
-
-// Visualizza tutte le flashcard (ritorna dalla vista "solo sbagliate")
-function viewAllFlashcards() {
-    if (!state.studyMode.active) return;
-
-    // Mostra solo le flashcard non corrette al primo colpo (come in enterStudyMode)
-    const flashcardsToStudy = state.currentFlashcards.filter(fc =>
-        !state.performance.correctFirstAttempt.includes(fc.id)
-    );
-
-    state.studyMode.flashcards = flashcardsToStudy;
-    state.studyMode.currentIndex = 0;
-    state.studyMode.viewingIncorrect = false;
-    renderStudyCard();
-
-    // Nascondi pulsante "Mostra Tutte"
-    document.getElementById('viewAllBtn').style.display = 'none';
-
-    showToast(`Mostrando ${flashcardsToStudy.length} flashcard da studiare`, 'success');
-}
-
-// Timer per riproporre flashcard sbagliate ogni 3 minuti
-let incorrectReviewInterval = null;
-
-function startIncorrectReviewTimer() {
-    // Pulisci timer esistente
-    if (incorrectReviewInterval) {
-        clearInterval(incorrectReviewInterval);
-    }
-
-    // Avvia timer solo se in modalità studio
-    if (!state.studyMode.active) return;
-
-    incorrectReviewInterval = setInterval(() => {
-        // Solo se in modalità studio e ci sono sbagliate
-        if (state.studyMode.active && state.performance.incorrect.length > 0) {
-            const incorrectFlashcards = state.currentFlashcards.filter(fc =>
-                state.performance.incorrect.includes(fc.id)
-            );
-
-            if (incorrectFlashcards.length > 0) {
-                // Riproponi una flashcard sbagliata random
-                const randomIncorrect = incorrectFlashcards[
-                    Math.floor(Math.random() * incorrectFlashcards.length)
-                ];
-
-                // Trova l'indice nella lista attuale
-                const index = state.studyMode.flashcards.findIndex(fc => fc.id === randomIncorrect.id);
-
-                if (index !== -1) {
-                    state.studyMode.currentIndex = index;
-                    renderStudyCard();
-                    showToast('💡 Ripasso: una flashcard che hai sbagliato!', 'warning');
-                }
-            }
-        }
-    }, 3 * 60 * 1000); // 3 minuti
-}
-
-function stopIncorrectReviewTimer() {
-    if (incorrectReviewInterval) {
-        clearInterval(incorrectReviewInterval);
-        incorrectReviewInterval = null;
-    }
-}
-
-// Funzioni modifica/elimina in modalità studio
+// ===================================
+// EDIT/DELETE IN STUDY MODE
+// ===================================
 
 function editStudyFlashcard() {
     const card = state.studyMode.flashcards[state.studyMode.currentIndex];
 
-    // Salva l'ID per il salvataggio
     state.editingFlashcardId = card.id;
 
-    // Popola il modal con i dati della flashcard
     document.getElementById('editQuestionInput').value = card.question;
     document.getElementById('editOption0').value = card.options[0];
     document.getElementById('editOption1').value = card.options[1];
@@ -1468,7 +1684,6 @@ function editStudyFlashcard() {
     document.getElementById('editCorrectAnswer').value = card.correctAnswer;
     document.getElementById('editExplanation').value = card.explanation;
 
-    // Mostra modal
     document.getElementById('editFlashcardModal').classList.add('show');
 }
 
@@ -1479,7 +1694,6 @@ function closeEditFlashcardModal() {
 async function saveEditedFlashcard() {
     const flashcardId = state.editingFlashcardId;
 
-    // Raccogli dati dal form
     const cardData = {
         question: document.getElementById('editQuestionInput').value.trim(),
         options: [
@@ -1492,7 +1706,6 @@ async function saveEditedFlashcard() {
         explanation: document.getElementById('editExplanation').value.trim()
     };
 
-    // Validazione
     if (!cardData.question || cardData.options.some(opt => !opt) || !cardData.explanation) {
         showToast('Compila tutti i campi obbligatori', 'error');
         return;
@@ -1502,19 +1715,14 @@ async function saveEditedFlashcard() {
         let savedCard;
 
         if (flashcardId) {
-            // Modifica esistente
             savedCard = await apiCall(`/flashcards/${flashcardId}`, {
                 method: 'PUT',
                 body: JSON.stringify(cardData)
             });
 
-            // Aggiorna in currentFlashcards
             const mainCard = state.currentFlashcards.find(fc => fc.id === flashcardId);
-            if (mainCard) {
-                Object.assign(mainCard, savedCard);
-            }
+            if (mainCard) Object.assign(mainCard, savedCard);
 
-            // Aggiorna anche in studyMode se attivo
             if (state.studyMode.active) {
                 const studyCard = state.studyMode.flashcards[state.studyMode.currentIndex];
                 if (studyCard && studyCard.id === flashcardId) {
@@ -1525,21 +1733,16 @@ async function saveEditedFlashcard() {
 
             showToast('Flashcard modificata con successo!', 'success');
         } else {
-            // Crea nuova
             savedCard = await apiCall(`/workspaces/${state.currentWorkspace.id}/flashcards`, {
                 method: 'POST',
                 body: JSON.stringify(cardData)
             });
 
-            // Aggiungi a currentFlashcards
             state.currentFlashcards.push(savedCard);
-
             showToast('Flashcard creata con successo!', 'success');
         }
 
-        // Re-render lista flashcards
         renderFlashcards();
-
         closeEditFlashcardModal();
     } catch (error) {
         showToast(error.message, 'error');
@@ -1549,22 +1752,14 @@ async function saveEditedFlashcard() {
 async function deleteStudyFlashcard() {
     const card = state.studyMode.flashcards[state.studyMode.currentIndex];
 
-    if (!confirm('Sei sicuro di voler eliminare questa flashcard?')) {
-        return;
-    }
+    if (!confirm('Sei sicuro di voler eliminare questa flashcard?')) return;
 
     try {
-        await apiCall(`/flashcards/${card.id}`, {
-            method: 'DELETE'
-        });
+        await apiCall(`/flashcards/${card.id}`, { method: 'DELETE' });
 
-        // Rimuovi dalla lista studio
         state.studyMode.flashcards.splice(state.studyMode.currentIndex, 1);
-
-        // Rimuovi da currentFlashcards
         state.currentFlashcards = state.currentFlashcards.filter(fc => fc.id !== card.id);
 
-        // Se non ci sono più flashcard, esci dalla modalità studio
         if (state.studyMode.flashcards.length === 0) {
             showToast('Tutte le flashcard eliminate', 'info');
             exitStudyMode();
@@ -1572,7 +1767,6 @@ async function deleteStudyFlashcard() {
             return;
         }
 
-        // Vai alla flashcard precedente se eri all'ultima
         if (state.studyMode.currentIndex >= state.studyMode.flashcards.length) {
             state.studyMode.currentIndex = state.studyMode.flashcards.length - 1;
         }
@@ -1585,14 +1779,20 @@ async function deleteStudyFlashcard() {
     }
 }
 
-// Event listeners per modal edit flashcard
+// ===================================
+// EVENT LISTENERS FOR EDIT MODAL
+// ===================================
+
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('closeEditFlashcardBtn').addEventListener('click', closeEditFlashcardModal);
     document.getElementById('cancelEditFlashcardBtn').addEventListener('click', closeEditFlashcardModal);
     document.getElementById('saveEditFlashcardBtn').addEventListener('click', saveEditedFlashcard);
 });
 
-// Make functions globally accessible for onclick handlers
+// ===================================
+// GLOBAL WINDOW FUNCTIONS
+// ===================================
+
 window.selectWorkspace = selectWorkspace;
 window.selectAnswer = selectAnswer;
 window.deleteFlashcard = deleteFlashcard;
@@ -1602,3 +1802,6 @@ window.viewIncorrectFlashcards = viewIncorrectFlashcards;
 window.viewAllFlashcards = viewAllFlashcards;
 window.editStudyFlashcard = editStudyFlashcard;
 window.deleteStudyFlashcard = deleteStudyFlashcard;
+window.editFlashcard = editFlashcard;
+window.continueStudy = continueStudy;
+window.restartQuiz = restartQuiz;
