@@ -36,7 +36,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB limit - supporta PDF grandi
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.pdf', '.txt', '.docx', '.md', '.doc'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -241,6 +241,9 @@ app.post('/api/workspaces/:id/upload/cancel', (req, res) => {
 
 // Upload file and generate flashcards
 app.post('/api/workspaces/:id/upload', upload.single('file'), async (req, res) => {
+  // Timeout esteso per documenti grandi (30 minuti)
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
   try {
     const { id } = req.params;
     const file = req.file;

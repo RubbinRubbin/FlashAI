@@ -604,8 +604,8 @@ async function uploadFile(file) {
         return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-        showToast('File troppo grande. Massimo 10MB', 'error');
+    if (file.size > 200 * 1024 * 1024) {
+        showToast('File troppo grande. Massimo 200MB', 'error');
         return;
     }
 
@@ -1223,40 +1223,37 @@ function updateProgressUI(progress) {
         progressFill.style.width = '100%';
         progressFill.style.background = 'var(--warning-color)';
         uploadStatus.textContent = `⏸️ Interrotto - ${progress.flashcardsGenerated} flashcard salvate`;
-    } else if (progress.flashcardsGenerated > 0 && progress.currentBatch > 0) {
-        // Generating flashcards - mostra progresso batch
-        const percentage = progress.totalBatches > 0
-            ? (progress.currentBatch / progress.totalBatches) * 100
-            : 0;
+        progressTime.textContent = '';
+    } else if (progress.currentBatch > 0 && progress.totalBatches > 0) {
+        // Batch processing attivo - mostra countdown
+        const percentage = (progress.currentBatch / progress.totalBatches) * 100;
 
         progressSection.textContent = `Batch ${progress.currentBatch}/${progress.totalBatches}`;
         progressFlashcards.textContent = `${progress.flashcardsGenerated} flashcard generate`;
         progressFill.style.width = `${percentage}%`;
+        uploadStatus.textContent = `Generando flashcard...`;
 
-        // Calculate estimated time remaining (NOT total time)
-        if (progress.currentBatch > 0 && progress.currentBatch < progress.totalBatches) {
-            const avgTimePerBatch = elapsed / progress.currentBatch; // ms per batch
-            const remainingBatches = progress.totalBatches - progress.currentBatch;
-            const estimatedRemainingMs = avgTimePerBatch * remainingBatches;
+        // Calcola tempo rimanente stimato (countdown)
+        const avgTimePerBatch = elapsed / progress.currentBatch;
+        const remainingBatches = progress.totalBatches - progress.currentBatch;
+        const estimatedRemainingMs = avgTimePerBatch * remainingBatches;
 
+        if (remainingBatches > 0) {
             const estSeconds = Math.floor(estimatedRemainingMs / 1000);
             const estMinutes = Math.floor(estSeconds / 60);
             const estSecondsRemainder = estSeconds % 60;
-
-            uploadStatus.textContent = `Generando flashcard...`;
-            progressTime.textContent = `Tempo rimanente: ~${estMinutes}m ${estSecondsRemainder}s`;
+            progressTime.textContent = `⏳ Tempo rimanente: ~${estMinutes}m ${estSecondsRemainder < 10 ? '0' : ''}${estSecondsRemainder}s`;
         } else {
-            uploadStatus.textContent = `Generando flashcard...`;
-            progressTime.textContent = `Tempo trascorso: ${elapsedMinutes}m ${elapsedSecondsRemainder}s`;
+            progressTime.textContent = `Completamento in corso...`;
         }
     } else {
-        // Still analyzing (prima batch)
+        // Prima batch - AI sta analizzando, non abbiamo dati per stimare
         progressSection.textContent = `AI sta leggendo il documento...`;
         progressFlashcards.textContent = `Analisi in corso`;
-        progressFill.style.width = '30%';
+        progressFill.style.width = '10%';
         progressFill.style.transition = 'width 2s ease-in-out';
-        uploadStatus.textContent = `Analizzando documento (${elapsedSeconds}s)`;
-        progressTime.textContent = `Tempo trascorso: ${elapsedMinutes}m ${elapsedSecondsRemainder}s`;
+        uploadStatus.textContent = `Preparazione batch in corso...`;
+        progressTime.textContent = `In attesa della prima risposta AI...`;
     }
 
     // Update global state
