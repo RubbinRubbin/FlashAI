@@ -10,35 +10,39 @@
     <div class="container">
         <!-- Header -->
         <header class="header">
+            <button class="sidebar-toggle" id="sidebarToggleBtn" aria-label="Apri workspace">&#9776;</button>
             <div class="logo">
-                <h1>⚡ FlashAI</h1>
+                <h1>FlashAI</h1>
                 <p class="tagline">Genera flashcard intelligenti dai tuoi documenti</p>
             </div>
+            <div class="header-spacer"></div>
             <button class="btn btn-primary" id="newWorkspaceBtn">
-                <span class="icon">➕</span> Nuovo Workspace
+                <span class="icon">+</span> Nuovo Workspace
             </button>
         </header>
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Sidebar - Workspace List -->
-            <aside class="sidebar">
-                <h2 class="sidebar-title">📚 I tuoi Workspace</h2>
+            <!-- Sidebar - Collapsible Overlay -->
+            <aside class="sidebar" id="sidebar">
+                <button class="sidebar-close" id="sidebarCloseBtn" aria-label="Chiudi">&times;</button>
+                <h2 class="sidebar-title">I tuoi Workspace</h2>
                 <div id="workspaceList" class="workspace-list">
-                    <div class="loading">⏳ Caricamento...</div>
+                    <div class="loading">Caricamento...</div>
                 </div>
             </aside>
+            <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
             <!-- Content Area -->
             <main class="content">
                 <!-- Welcome Screen -->
                 <div id="welcomeScreen" class="welcome-screen">
                     <div class="welcome-content">
-                        <div class="welcome-icon">🎓</div>
-                        <h2>Benvenuto in FlashAI!</h2>
+                        <div class="welcome-icon">&#9889;</div>
+                        <h2>Benvenuto in FlashAI</h2>
                         <p>Crea un nuovo workspace per iniziare a generare flashcard intelligenti dai tuoi documenti.</p>
                         <button class="btn btn-large btn-primary" onclick="document.getElementById('newWorkspaceBtn').click()">
-                            <span class="icon">➕</span> Crea il tuo primo Workspace
+                            <span class="icon">+</span> Crea il tuo primo Workspace
                         </button>
                     </div>
                 </div>
@@ -51,61 +55,102 @@
                             <h2 id="workspaceName">Workspace</h2>
                             <p id="workspaceDescription" class="workspace-description"></p>
                         </div>
-                        <div class="workspace-actions">
-                            <button class="btn btn-secondary" id="editWorkspaceBtn">
-                                <span class="icon">✏️</span> Modifica
-                            </button>
-                            <button class="btn btn-danger" id="deleteWorkspaceBtn">
-                                <span class="icon">🗑️</span> Elimina
-                            </button>
-                        </div>
                     </div>
 
-                    <!-- Action Buttons -->
-                    <div class="action-buttons">
-                        <input type="file" id="fileInput" accept=".pdf,.txt,.docx,.doc,.md" hidden>
-                        <button class="btn btn-secondary" id="uploadDocumentBtn">
-                            <span class="icon">📄</span> Carica Documento
-                        </button>
-                        <button class="btn btn-secondary" id="studyModeBtn" style="display: none;">
-                            <span class="icon">🎯</span> Inizia Studio
-                        </button>
-                        <button class="btn btn-secondary" id="restartStudyBtn" style="display: none;">
-                            <span class="icon">↻</span> Ricomincia
-                        </button>
-                        <button class="btn btn-secondary" id="regenerateFlashcardsBtn" style="display: none;">
-                            <span class="icon">🔄</span> Genera Altre
-                        </button>
-                        <button class="btn btn-secondary" id="viewFlashcardsBtn" style="display: none;">
-                            <span class="icon">📋</span> Visualizza Flashcard
-                        </button>
-                        <button class="btn btn-secondary" id="quizModeBtn" style="display: none;">
-                            <span class="icon">⏱️</span> Simulazione Quiz
-                        </button>
-                        <button class="btn btn-danger" id="deleteAllFlashcardsBtn" style="display: none;">
-                            <span class="icon">🗑️</span> Elimina Tutte le Flashcard
-                        </button>
-                    </div>
+                    <!-- Hidden file input -->
+                    <input type="file" id="fileInput" accept=".pdf,.txt,.docx,.doc,.md" hidden>
 
-                    <!-- Performance Stats -->
-                    <div id="workspacePerformanceStats" class="performance-stats-wrapper" style="display: none;">
-                        <div class="performance-stats">
-                            <div class="stat-item stat-correct">
-                                <span class="stat-label">Corrette</span>
-                                <span id="workspaceCorrectCount">0</span>
+                    <!-- Workspace Hub Dashboard -->
+                    <div class="workspace-hub" id="workspaceHub">
+
+                        <!-- Performance Stats -->
+                        <div id="workspacePerformanceStats" class="hub-performance" style="display: none;">
+                            <div class="hub-performance-stats">
+                                <div class="stat-item stat-correct">
+                                    <span class="stat-label">Corrette</span>
+                                    <span id="workspaceCorrectCount">0</span>
+                                </div>
+                                <div class="stat-item stat-incorrect">
+                                    <span class="stat-label">Sbagliate</span>
+                                    <span id="workspaceIncorrectCount">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Rimanenti</span>
+                                    <span id="workspaceRemainingCount">0</span>
+                                </div>
                             </div>
-                            <div class="stat-item stat-incorrect">
-                                <span class="stat-label">Sbagliate</span>
-                                <span id="workspaceIncorrectCount">0</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">Rimanenti</span>
-                                <span id="workspaceRemainingCount">0</span>
+                            <button class="btn btn-primary btn-continue-study" id="continueStudyBtn" onclick="continueStudy()">
+                                <span class="icon">&#9654;</span> Continua Studio
+                            </button>
+                        </div>
+
+                        <!-- STUDIO Section -->
+                        <div class="hub-section" id="hubStudioSection" style="display: none;">
+                            <h3 class="hub-section-title">Studio</h3>
+                            <div class="hub-section-grid">
+                                <button class="hub-card hub-card-primary" id="studyModeBtn">
+                                    <span class="hub-card-icon">&#127919;</span>
+                                    <span class="hub-card-label">Inizia Studio</span>
+                                    <span class="hub-card-desc">Studia le flashcard con feedback immediato</span>
+                                </button>
+                                <button class="hub-card" id="quizModeBtn">
+                                    <span class="hub-card-icon">&#9201;</span>
+                                    <span class="hub-card-label">Simulazione Quiz</span>
+                                    <span class="hub-card-desc">Quiz a tempo con punteggio finale</span>
+                                </button>
+                                <button class="hub-card" id="restartStudyBtn">
+                                    <span class="hub-card-icon">&#8635;</span>
+                                    <span class="hub-card-label">Ricomincia</span>
+                                    <span class="hub-card-desc">Resetta i progressi e ricomincia</span>
+                                </button>
                             </div>
                         </div>
-                        <button class="btn btn-primary btn-continue-study" id="continueStudyBtn" onclick="continueStudy()">
-                            <span class="icon">▶️</span> Continua Studio
-                        </button>
+
+                        <!-- GESTIONE Section -->
+                        <div class="hub-section">
+                            <h3 class="hub-section-title">Gestione</h3>
+                            <div class="hub-section-grid">
+                                <button class="hub-card" id="uploadDocumentBtn">
+                                    <span class="hub-card-icon">&#128196;</span>
+                                    <span class="hub-card-label">Carica Documento</span>
+                                    <span class="hub-card-desc">PDF, TXT, DOCX o MD</span>
+                                </button>
+                                <button class="hub-card" id="viewFlashcardsBtn" style="display: none;">
+                                    <span class="hub-card-icon">&#128203;</span>
+                                    <span class="hub-card-label">Visualizza Flashcard</span>
+                                    <span class="hub-card-desc">Sfoglia e modifica le flashcard</span>
+                                </button>
+                                <button class="hub-card" id="regenerateFlashcardsBtn" style="display: none;">
+                                    <span class="hub-card-icon">&#128260;</span>
+                                    <span class="hub-card-label">Genera Altre</span>
+                                    <span class="hub-card-desc">Genera nuove flashcard dal documento</span>
+                                </button>
+                                <button class="hub-card" id="createFlashcardHubBtn">
+                                    <span class="hub-card-icon">&#10133;</span>
+                                    <span class="hub-card-label">Crea Flashcard</span>
+                                    <span class="hub-card-desc">Aggiungi manualmente una flashcard</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- WORKSPACE Section -->
+                        <div class="hub-section">
+                            <h3 class="hub-section-title">Workspace</h3>
+                            <div class="hub-section-grid hub-section-grid-small">
+                                <button class="hub-card hub-card-small" id="editWorkspaceBtn">
+                                    <span class="hub-card-icon">&#9998;</span>
+                                    <span class="hub-card-label">Modifica Workspace</span>
+                                </button>
+                                <button class="hub-card hub-card-small hub-card-danger" id="deleteAllFlashcardsBtn" style="display: none;">
+                                    <span class="hub-card-icon">&#128465;</span>
+                                    <span class="hub-card-label">Elimina Flashcard</span>
+                                </button>
+                                <button class="hub-card hub-card-small hub-card-danger" id="deleteWorkspaceBtn">
+                                    <span class="hub-card-icon">&#128465;</span>
+                                    <span class="hub-card-label">Elimina Workspace</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Upload Progress -->
@@ -117,7 +162,7 @@
                                 <span id="progressTime">Tempo stimato: --</span>
                             </div>
                             <button class="btn btn-danger btn-small" id="cancelUploadBtn">
-                                <span class="icon">⏹</span> Ferma
+                                <span class="icon">&#9209;</span> Ferma
                             </button>
                         </div>
                         <div class="progress-bar">
@@ -128,17 +173,17 @@
 
                     <!-- Document Viewer -->
                     <div id="documentViewer" class="document-viewer" style="display: none;">
-                        <h3>📄 Documento</h3>
+                        <h3>Documento</h3>
                         <div id="documentContent" class="document-content"></div>
                     </div>
 
                     <!-- Flashcards Section -->
                     <div id="flashcardsSection" class="flashcards-section" style="display: none;">
                         <div class="section-header">
-                            <h3>🎴 Flashcard</h3>
+                            <h3>Flashcard</h3>
                             <div style="display: flex; gap: 12px; align-items: center;">
                                 <button class="btn btn-success btn-sm" id="createFlashcardBtn">
-                                    <span class="icon">➕</span> Crea Nuova
+                                    <span class="icon">+</span> Crea Nuova
                                 </button>
                                 <span id="flashcardCount" class="flashcard-count">0 flashcard</span>
                             </div>
@@ -151,10 +196,10 @@
                 <div id="studyModeView" class="study-mode-view" style="display: none;">
                     <div class="study-header">
                         <button class="btn btn-secondary" id="exitStudyBtn">
-                            <span class="icon">←</span> Esci dalla Modalità Studio
+                            <span class="icon">&larr;</span> Esci dallo Studio
                         </button>
                         <div class="study-progress">
-                            <span id="quizTimer" style="display: none; margin-right: 20px; color: var(--danger); font-weight: bold;">⏱️ <span id="quizTimeRemaining">00:00</span></span>
+                            <span id="quizTimer" style="display: none; margin-right: 20px; color: var(--danger); font-weight: bold;">&#9201; <span id="quizTimeRemaining">00:00</span></span>
                             <span id="studyProgress">0 / 0</span>
                         </div>
                     </div>
@@ -177,7 +222,7 @@
                     <!-- Progress Bar - Study Mode -->
                     <div class="progress-bar-container" id="studyProgressBar">
                         <div class="progress-bar-header">
-                            <span class="progress-text">📊 Progresso</span>
+                            <span class="progress-text">Progresso</span>
                             <span class="progress-numbers"><span id="progressCompleted">0</span> / <span id="progressTotal">0</span></span>
                         </div>
                         <div class="progress-bar">
@@ -188,7 +233,7 @@
                     <!-- Progress Bar - Quiz Mode -->
                     <div class="progress-bar-container" id="quizProgressBar" style="display: none;">
                         <div class="progress-bar-header">
-                            <span class="progress-text">⏱️ Progresso Quiz</span>
+                            <span class="progress-text">Progresso Quiz</span>
                             <span class="progress-numbers"><span id="quizProgressCompleted">0</span> / <span id="quizProgressTotal">0</span></span>
                         </div>
                         <div class="progress-bar">
@@ -198,16 +243,16 @@
 
                     <div class="study-controls">
                         <button class="btn btn-secondary" id="shuffleBtn" onclick="shuffleFlashcards()">
-                            🔀 Mescola
+                            Mescola
                         </button>
                         <button class="btn btn-secondary" id="viewIncorrectBtn" onclick="viewIncorrectFlashcards()">
-                            ❌ Vedi Sbagliate (<span id="incorrectCountBadge">0</span>)
+                            Vedi Sbagliate (<span id="incorrectCountBadge">0</span>)
                         </button>
                         <button class="btn btn-secondary" id="viewAllBtn" onclick="viewAllFlashcards()" style="display: none;">
-                            📚 Mostra Tutte
+                            Mostra Tutte
                         </button>
                         <button class="btn btn-secondary" id="restartQuizBtn" onclick="restartQuiz()" style="display: none;">
-                            ↻ Ricomincia Quiz
+                            Ricomincia Quiz
                         </button>
                     </div>
 
@@ -219,10 +264,10 @@
 
                     <div class="study-navigation">
                         <button class="btn btn-secondary" id="prevCardBtn">
-                            <span class="icon">←</span> Precedente
+                            <span class="icon">&larr;</span> Precedente
                         </button>
                         <button class="btn btn-secondary" id="nextCardBtn">
-                            Successiva <span class="icon">→</span>
+                            Successiva <span class="icon">&rarr;</span>
                         </button>
                     </div>
                 </div>
@@ -234,7 +279,7 @@
     <div id="workspaceModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="modalTitle">📁 Nuovo Workspace</h2>
+                <h2 id="modalTitle">Nuovo Workspace</h2>
                 <button class="close-btn" id="closeModalBtn">&times;</button>
             </div>
             <div class="modal-body">
@@ -258,7 +303,7 @@
     <div id="editFlashcardModal" class="modal">
         <div class="modal-content modal-large">
             <div class="modal-header">
-                <h2>✏️ Modifica Flashcard</h2>
+                <h2>Modifica Flashcard</h2>
                 <button class="close-btn" id="closeEditFlashcardBtn">&times;</button>
             </div>
             <div class="modal-body">
@@ -298,7 +343,7 @@
     <div id="quizModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>⏱️ Configura Simulazione Quiz</h2>
+                <h2>Configura Simulazione Quiz</h2>
                 <button class="close-btn" id="closeQuizModalBtn">&times;</button>
             </div>
             <div class="modal-body">
@@ -315,7 +360,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="cancelQuizBtn">Annulla</button>
-                <button class="btn btn-success" id="startQuizBtn">🚀 Inizia Quiz</button>
+                <button class="btn btn-success" id="startQuizBtn">Inizia Quiz</button>
             </div>
         </div>
     </div>

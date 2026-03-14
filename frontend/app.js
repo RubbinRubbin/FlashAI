@@ -46,6 +46,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Event Listeners
 function initializeEventListeners() {
+    // Sidebar toggle
+    document.getElementById('sidebarToggleBtn').addEventListener('click', toggleSidebar);
+    document.getElementById('sidebarCloseBtn').addEventListener('click', closeSidebar);
+    document.getElementById('sidebarBackdrop').addEventListener('click', closeSidebar);
+
     // Workspace management
     document.getElementById('newWorkspaceBtn').addEventListener('click', () => openWorkspaceModal(false));
     document.getElementById('editWorkspaceBtn').addEventListener('click', () => openWorkspaceModal(true));
@@ -58,19 +63,8 @@ function initializeEventListeners() {
 
     // File upload
     const fileInput = document.getElementById('fileInput');
-    const uploadDocumentBtn = document.getElementById('uploadDocumentBtn');
-    const viewFlashcardsBtn = document.getElementById('viewFlashcardsBtn');
-
-    if (uploadDocumentBtn) {
-        uploadDocumentBtn.addEventListener('click', () => {
-            fileInput.click();
-        });
-    }
-
-    if (viewFlashcardsBtn) {
-        viewFlashcardsBtn.addEventListener('click', toggleFlashcardsView);
-    }
-
+    document.getElementById('uploadDocumentBtn').addEventListener('click', () => fileInput.click());
+    document.getElementById('viewFlashcardsBtn').addEventListener('click', toggleFlashcardsView);
     fileInput.addEventListener('change', handleFileSelect);
 
     // Cancel upload
@@ -80,6 +74,9 @@ function initializeEventListeners() {
     document.getElementById('regenerateFlashcardsBtn').addEventListener('click', regenerateFlashcards);
     document.getElementById('restartStudyBtn').addEventListener('click', restartStudy);
     document.getElementById('deleteAllFlashcardsBtn').addEventListener('click', deleteAllFlashcards);
+
+    // Hub create flashcard
+    document.getElementById('createFlashcardHubBtn').addEventListener('click', createNewFlashcard);
 
     // Study mode
     document.getElementById('studyModeBtn').addEventListener('click', enterStudyMode);
@@ -93,21 +90,27 @@ function initializeEventListeners() {
     document.getElementById('cancelQuizBtn').addEventListener('click', closeQuizModal);
     document.getElementById('startQuizBtn').addEventListener('click', startQuizMode);
 
-    // Create new flashcard
+    // Create new flashcard (in flashcards section)
     document.getElementById('createFlashcardBtn').addEventListener('click', createNewFlashcard);
 
     // Close modal on outside click
     document.getElementById('workspaceModal').addEventListener('click', (e) => {
-        if (e.target.id === 'workspaceModal') {
-            closeWorkspaceModal();
-        }
+        if (e.target.id === 'workspaceModal') closeWorkspaceModal();
     });
-
     document.getElementById('quizModal').addEventListener('click', (e) => {
-        if (e.target.id === 'quizModal') {
-            closeQuizModal();
-        }
+        if (e.target.id === 'quizModal') closeQuizModal();
     });
+}
+
+// Sidebar Toggle
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarBackdrop').classList.toggle('active');
+}
+
+function closeSidebar() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebarBackdrop').classList.remove('active');
 }
 
 // API Calls
@@ -170,6 +173,7 @@ async function selectWorkspace(workspaceId) {
     if (!workspace) return;
 
     state.currentWorkspace = workspace;
+    closeSidebar();
     await loadFlashcards(workspaceId);
     loadPerformance();
     showWorkspaceView();
@@ -317,6 +321,10 @@ function renderFlashcards() {
     viewFlashcardsBtn.style.display = hasFlashcards ? 'flex' : 'none';
     quizModeBtn.style.display = hasFlashcards ? 'flex' : 'none';
     deleteAllBtn.style.display = hasFlashcards ? 'flex' : 'none';
+
+    // Show/hide hub Studio section
+    const hubStudioSection = document.getElementById('hubStudioSection');
+    if (hubStudioSection) hubStudioSection.style.display = hasFlashcards ? 'block' : 'none';
 
     // Show flashcards section if there are flashcards
     if (hasFlashcards) {
@@ -572,13 +580,14 @@ function editFlashcard(flashcardId) {
 function toggleFlashcardsView() {
     const flashcardsSection = document.getElementById('flashcardsSection');
     const viewFlashcardsBtn = document.getElementById('viewFlashcardsBtn');
+    const label = viewFlashcardsBtn.querySelector('.hub-card-label');
 
     if (flashcardsSection.style.display === 'none') {
         flashcardsSection.style.display = 'block';
-        viewFlashcardsBtn.textContent = '📋 Nascondi Flashcard';
+        if (label) label.textContent = 'Nascondi Flashcard';
     } else {
         flashcardsSection.style.display = 'none';
-        viewFlashcardsBtn.innerHTML = '<span class="icon">📋</span> Visualizza Flashcard';
+        if (label) label.textContent = 'Visualizza Flashcard';
     }
 }
 
