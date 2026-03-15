@@ -66,8 +66,12 @@ function initializeEventListeners() {
     document.getElementById('editWorkspaceBtn').addEventListener('click', () => openWorkspaceModal(true));
     document.getElementById('deleteWorkspaceBtn').addEventListener('click', deleteCurrentWorkspace);
 
-    // Management panel toggle
-    document.getElementById('managementToggleBtn').addEventListener('click', toggleManagementPanel);
+    // Management modal
+    document.getElementById('managementToggleBtn').addEventListener('click', openManagementModal);
+    document.getElementById('closeManagementModalBtn').addEventListener('click', closeManagementModal);
+    document.getElementById('managementModal').addEventListener('click', (e) => {
+        if (e.target.id === 'managementModal') closeManagementModal();
+    });
 
     // Modal
     document.getElementById('closeModalBtn').addEventListener('click', closeWorkspaceModal);
@@ -76,7 +80,7 @@ function initializeEventListeners() {
 
     // File upload
     const fileInput = document.getElementById('fileInput');
-    document.getElementById('uploadDocumentBtn').addEventListener('click', () => fileInput.click());
+    document.getElementById('uploadFirstDocBtn').addEventListener('click', () => fileInput.click());
     document.getElementById('viewFlashcardsBtn').addEventListener('click', toggleFlashcardsView);
     fileInput.addEventListener('change', handleFileSelect);
 
@@ -86,6 +90,7 @@ function initializeEventListeners() {
     // Flashcard actions
     document.getElementById('regenerateFlashcardsBtn').addEventListener('click', regenerateFlashcards);
     document.getElementById('restartStudyBtn').addEventListener('click', restartStudy);
+    document.getElementById('resetStatsBtn').addEventListener('click', resetStatistics);
     document.getElementById('deleteAllFlashcardsBtn').addEventListener('click', deleteAllFlashcards);
 
     // Hub create flashcard
@@ -133,9 +138,70 @@ function closeSidebar() {
 // MANAGEMENT PANEL
 // ===================================
 
-function toggleManagementPanel() {
-    const panel = document.getElementById('managementPanel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+function openManagementModal() {
+    document.getElementById('managementModal').classList.add('show');
+}
+
+function closeManagementModal() {
+    document.getElementById('managementModal').classList.remove('show');
+}
+
+// ===================================
+// CONFIRM/ALERT DIALOG
+// ===================================
+
+function showConfirmDialog(title, message, confirmText = 'Conferma', cancelText = 'Annulla', isDanger = false) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirmDialog');
+        document.getElementById('confirmDialogTitle').textContent = title;
+        document.getElementById('confirmDialogMessage').textContent = message;
+
+        const confirmBtn = document.getElementById('confirmDialogConfirmBtn');
+        const cancelBtn = document.getElementById('confirmDialogCancelBtn');
+        const closeBtn = document.getElementById('confirmDialogCloseBtn');
+
+        confirmBtn.textContent = confirmText;
+        confirmBtn.className = isDanger ? 'btn btn-danger' : 'btn btn-primary';
+
+        if (cancelText) {
+            cancelBtn.textContent = cancelText;
+            cancelBtn.style.display = 'inline-flex';
+        } else {
+            cancelBtn.style.display = 'none';
+        }
+
+        function cleanup() {
+            modal.classList.remove('show');
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+            modal.removeEventListener('click', onBackdrop);
+        }
+        function onConfirm() { cleanup(); resolve(true); }
+        function onCancel() { cleanup(); resolve(false); }
+        function onBackdrop(e) { if (e.target === modal) { cleanup(); resolve(false); } }
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+        modal.addEventListener('click', onBackdrop);
+
+        modal.classList.add('show');
+    });
+}
+
+function showAlertDialog(title, message, buttonText = 'OK') {
+    return showConfirmDialog(title, message, buttonText, null);
+}
+
+function updateSecondaryButtons() {
+    const hasFlashcards = state.currentFlashcards.length > 0;
+    const hasStudyData = state.performance.correct.length > 0 ||
+        state.performance.incorrect.length > 0 ||
+        state.stats.studySessions.length > 0 ||
+        state.stats.quizSessions.length > 0;
+    document.getElementById('restartStudyBtn').style.display = (hasFlashcards && hasStudyData) ? 'inline-flex' : 'none';
+    document.getElementById('resetStatsBtn').style.display = (hasFlashcards && hasStudyData) ? 'inline-flex' : 'none';
 }
 
 // ===================================
@@ -212,9 +278,11 @@ async function selectWorkspace(workspaceId) {
     showWorkspaceView();
     renderWorkspaceList();
     updateStatsPanel();
+    updateSecondaryButtons();
 }
 
 function openWorkspaceModal(isEdit) {
+    closeManagementModal();
     state.isEditMode = isEdit;
     const modal = document.getElementById('workspaceModal');
     const title = document.getElementById('modalTitle');
@@ -285,7 +353,7 @@ async function saveWorkspace() {
 async function deleteCurrentWorkspace() {
     if (!state.currentWorkspace) return;
 
-    if (!confirm(`Sei sicuro di voler eliminare "${state.currentWorkspace.name}"? Tutte le flashcard associate verranno eliminate.`)) {
+    if (!(await showConfirmDialog('Elimina Workspace', `Sei sicuro di voler eliminare "${state.currentWorkspace.name}"? Tutte le flashcard associate verranno eliminate.`, 'Elimina', 'Annulla', true))) {
         return;
     }
 
@@ -305,6 +373,7 @@ async function deleteCurrentWorkspace() {
         state.srs = {};
         state.stats = { studySessions: [], quizSessions: [], cardHistory: {}, totalStudyTimeMs: 0, totalQuizTimeMs: 0 };
 
+        closeManagementModal();
         renderWorkspaceList();
         showWelcomeScreen();
         showToast('Workspace eliminato', 'success');
@@ -330,28 +399,38 @@ function renderFlashcards() {
     const listEl = document.getElementById('flashcardsList');
     const countEl = document.getElementById('flashcardCount');
     const regenerateBtn = document.getElementById('regenerateFlashcardsBtn');
-    const restartBtn = document.getElementById('restartStudyBtn');
     const viewFlashcardsBtn = document.getElementById('viewFlashcardsBtn');
     const deleteAllBtn = document.getElementById('deleteAllFlashcardsBtn');
     const mainActions = document.getElementById('mainActions');
     const statsPanel = document.getElementById('statsPanel');
+    const emptyPrompt = document.getElementById('emptyWorkspacePrompt');
 
     countEl.textContent = `${state.currentFlashcards.length} flashcard`;
     const hasFlashcards = state.currentFlashcards.length > 0;
 
-    // Show/hide management items that need flashcards
+    // Show/hide management modal items that need flashcards
     regenerateBtn.style.display = hasFlashcards ? 'flex' : 'none';
-    restartBtn.style.display = hasFlashcards ? 'flex' : 'none';
     viewFlashcardsBtn.style.display = hasFlashcards ? 'flex' : 'none';
     deleteAllBtn.style.display = hasFlashcards ? 'flex' : 'none';
 
     // Show/hide main action buttons
     if (mainActions) mainActions.style.display = hasFlashcards ? 'flex' : 'none';
 
+    // Show/hide ricomincia + reset stats buttons (inside mainActions, visible after first study/quiz)
+    const hasStudyData = state.performance.correct.length > 0 ||
+        state.performance.incorrect.length > 0 ||
+        state.stats.studySessions.length > 0 ||
+        state.stats.quizSessions.length > 0;
+    document.getElementById('restartStudyBtn').style.display = (hasFlashcards && hasStudyData) ? 'inline-flex' : 'none';
+    document.getElementById('resetStatsBtn').style.display = (hasFlashcards && hasStudyData) ? 'inline-flex' : 'none';
+
+    // Show/hide empty workspace prompt
+    if (emptyPrompt) emptyPrompt.style.display = hasFlashcards ? 'none' : 'block';
+
     // Show/hide stats panel
     if (statsPanel) statsPanel.style.display = hasFlashcards ? 'block' : 'none';
 
-    // Flashcards section stays hidden by default (user toggles via management panel)
+    // Flashcards section stays hidden by default (user toggles via management modal)
 
     updatePerformanceStats();
 
@@ -465,7 +544,7 @@ function loadPerformance() {
 }
 
 async function deleteFlashcard(flashcardId) {
-    if (!confirm('Sei sicuro di voler eliminare questa flashcard?')) return;
+    if (!(await showConfirmDialog('Elimina Flashcard', 'Sei sicuro di voler eliminare questa flashcard?', 'Elimina', 'Annulla', true))) return;
 
     try {
         await apiCall(`/flashcards/${flashcardId}`, { method: 'DELETE' });
@@ -482,7 +561,7 @@ async function deleteAllFlashcards() {
     const count = state.currentFlashcards.length;
     if (count === 0) return;
 
-    if (!confirm(`Sei sicuro di voler eliminare tutte le ${count} flashcard?`)) return;
+    if (!(await showConfirmDialog('Elimina Flashcard', `Sei sicuro di voler eliminare tutte le ${count} flashcard?`, 'Elimina Tutte', 'Annulla', true))) return;
 
     try {
         const result = await apiCall(`/workspaces/${state.currentWorkspace.id}/flashcards`, { method: 'DELETE' });
@@ -493,6 +572,7 @@ async function deleteAllFlashcards() {
         savePerformance();
         saveSRS();
 
+        closeManagementModal();
         renderFlashcards();
         showToast(`${result.deletedCount} flashcard eliminate`, 'success');
     } catch (error) {
@@ -501,6 +581,7 @@ async function deleteAllFlashcards() {
 }
 
 function createNewFlashcard() {
+    closeManagementModal();
     state.editingFlashcardId = null;
 
     document.getElementById('editQuestionInput').value = '';
@@ -536,6 +617,7 @@ function editFlashcard(flashcardId) {
 // ===================================
 
 function toggleFlashcardsView() {
+    closeManagementModal();
     const flashcardsSection = document.getElementById('flashcardsSection');
     const viewFlashcardsBtn = document.getElementById('viewFlashcardsBtn');
     const label = viewFlashcardsBtn.querySelector('span:last-child');
@@ -654,8 +736,9 @@ async function uploadFile(file) {
 async function regenerateFlashcards() {
     if (!state.currentWorkspace) return;
 
-    if (!confirm('Vuoi generare nuove flashcard dal documento caricato? Le nuove verranno aggiunte alle esistenti.')) return;
+    if (!(await showConfirmDialog('Genera Flashcard', 'Vuoi generare nuove flashcard dal documento caricato? Le nuove verranno aggiunte alle esistenti.', 'Genera', 'Annulla'))) return;
 
+    closeManagementModal();
     const workspaceId = state.currentWorkspace.id;
 
     const uploadProgressEl = document.getElementById('uploadProgress');
@@ -1116,6 +1199,7 @@ function exitStudyMode() {
     document.getElementById('workspaceView').style.display = 'block';
 
     updateStatsPanel();
+    updateSecondaryButtons();
 }
 
 function renderStudyCard() {
@@ -1311,7 +1395,7 @@ function openQuizModal() {
 
     const maxQuestions = state.currentFlashcards.length;
     document.getElementById('quizQuestionsCount').max = maxQuestions;
-    document.getElementById('quizQuestionsCount').value = Math.min(20, maxQuestions);
+    document.getElementById('quizQuestionsCount').value = Math.min(30, maxQuestions);
 
     document.getElementById('quizModal').style.display = 'flex';
 }
@@ -1408,7 +1492,7 @@ function updateQuizTimer() {
     }
 }
 
-function endQuiz() {
+async function endQuiz() {
     if (state.quizMode.timerInterval) {
         clearInterval(state.quizMode.timerInterval);
         state.quizMode.timerInterval = null;
@@ -1433,16 +1517,14 @@ function endQuiz() {
         percentage
     );
 
-    let resultMessage = `Quiz Terminato!\n\n`;
-    resultMessage += `Risposte Corrette: ${correctCount}\n`;
+    let resultMessage = `Risposte Corrette: ${correctCount}\n`;
     resultMessage += `Risposte Sbagliate: ${answeredCount - correctCount}\n`;
     if (unansweredCount > 0) {
         resultMessage += `Domande Non Risposte: ${unansweredCount}\n`;
     }
-    resultMessage += `Totale Domande: ${totalQuestions}\n\n`;
-    resultMessage += `Punteggio Finale: ${percentage}%`;
+    resultMessage += `Totale Domande: ${totalQuestions}\n\nPunteggio Finale: ${percentage}%`;
 
-    alert(resultMessage);
+    await showAlertDialog('Quiz Terminato!', resultMessage);
 
     showToast(`Quiz terminato! ${correctCount}/${totalQuestions} corrette (${percentage}%)`,
         percentage >= 60 ? 'success' : 'warning');
@@ -1528,10 +1610,10 @@ function viewAllFlashcards() {
     showToast(`Mostrando tutte le ${state.currentFlashcards.length} flashcard`, 'success');
 }
 
-function restartStudy() {
+async function restartStudy() {
     if (state.currentFlashcards.length === 0) return;
 
-    if (!confirm('Vuoi ricominciare da capo? Le statistiche e i progressi SRS verranno resettati.')) return;
+    if (!(await showConfirmDialog('Ricomincia', 'Vuoi ricominciare da capo? Le statistiche e i progressi SRS verranno resettati.', 'Ricomincia', 'Annulla', true))) return;
 
     state.performance = { correct: [], incorrect: [], correctFirstAttempt: [] };
     state.srs = {};
@@ -1543,6 +1625,22 @@ function restartStudy() {
     updateStatsPanel();
 
     showToast('Studio riavviato! Buona fortuna!', 'success');
+}
+
+async function resetStatistics() {
+    if (!(await showConfirmDialog('Reset Statistiche', 'Vuoi resettare tutte le statistiche? I dati di studio e quiz verranno cancellati.', 'Reset', 'Annulla', true))) return;
+
+    state.stats = {
+        studySessions: [],
+        quizSessions: [],
+        cardHistory: {},
+        totalStudyTimeMs: 0,
+        totalQuizTimeMs: 0
+    };
+    saveStats();
+    updateStatsPanel();
+    renderFlashcards();
+    showToast('Statistiche resettate', 'success');
 }
 
 // ===================================
@@ -1557,9 +1655,6 @@ function showWelcomeScreen() {
 function showWorkspaceView() {
     document.getElementById('welcomeScreen').style.display = 'none';
     document.getElementById('workspaceView').style.display = 'block';
-
-    // Close management panel by default
-    document.getElementById('managementPanel').style.display = 'none';
 
     if (state.currentWorkspace) {
         document.getElementById('workspaceName').textContent = state.currentWorkspace.name;
@@ -1656,7 +1751,7 @@ function updateProgressUI(progress) {
 async function cancelUpload() {
     if (!state.currentWorkspace || !state.uploadProgress.active) return;
 
-    if (!confirm('Sei sicuro di voler fermare la generazione? Le flashcard già create verranno salvate.')) return;
+    if (!(await showConfirmDialog('Ferma Generazione', 'Sei sicuro di voler fermare la generazione? Le flashcard già create verranno salvate.', 'Ferma', 'Annulla', true))) return;
 
     try {
         await apiCall(`/workspaces/${state.currentWorkspace.id}/upload/cancel`, { method: 'POST' });
@@ -1752,7 +1847,7 @@ async function saveEditedFlashcard() {
 async function deleteStudyFlashcard() {
     const card = state.studyMode.flashcards[state.studyMode.currentIndex];
 
-    if (!confirm('Sei sicuro di voler eliminare questa flashcard?')) return;
+    if (!(await showConfirmDialog('Elimina Flashcard', 'Sei sicuro di voler eliminare questa flashcard?', 'Elimina', 'Annulla', true))) return;
 
     try {
         await apiCall(`/flashcards/${card.id}`, { method: 'DELETE' });

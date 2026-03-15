@@ -61,42 +61,12 @@
                     <!-- Hidden file input -->
                     <input type="file" id="fileInput" accept=".pdf,.txt,.docx,.doc,.md" hidden>
 
-                    <!-- Management Panel (collapsible) -->
-                    <div class="management-panel" id="managementPanel" style="display: none;">
-                        <div class="management-panel-grid">
-                            <button class="management-item" id="uploadDocumentBtn">
-                                <span class="management-icon">&#128196;</span>
-                                <span>Carica Documento</span>
-                            </button>
-                            <button class="management-item" id="viewFlashcardsBtn" style="display: none;">
-                                <span class="management-icon">&#128203;</span>
-                                <span>Visualizza Flashcard</span>
-                            </button>
-                            <button class="management-item" id="regenerateFlashcardsBtn" style="display: none;">
-                                <span class="management-icon">&#128260;</span>
-                                <span>Genera Altre</span>
-                            </button>
-                            <button class="management-item" id="createFlashcardHubBtn">
-                                <span class="management-icon">&#10133;</span>
-                                <span>Crea Flashcard</span>
-                            </button>
-                            <button class="management-item" id="restartStudyBtn" style="display: none;">
-                                <span class="management-icon">&#8635;</span>
-                                <span>Ricomincia</span>
-                            </button>
-                            <button class="management-item" id="editWorkspaceBtn">
-                                <span class="management-icon">&#9998;</span>
-                                <span>Modifica Workspace</span>
-                            </button>
-                            <button class="management-item" id="deleteAllFlashcardsBtn" style="display: none;">
-                                <span class="management-icon">&#128465;</span>
-                                <span>Elimina Flashcard</span>
-                            </button>
-                            <button class="management-item management-item-danger" id="deleteWorkspaceBtn">
-                                <span class="management-icon">&#128465;</span>
-                                <span>Elimina Workspace</span>
-                            </button>
-                        </div>
+                    <!-- Empty workspace prompt (no flashcards yet) -->
+                    <div class="empty-workspace-prompt" id="emptyWorkspacePrompt" style="display: none;">
+                        <p>Carica un documento per generare flashcard</p>
+                        <button class="btn btn-large btn-primary" id="uploadFirstDocBtn">
+                            <span class="icon">&#128196;</span> Carica Documento
+                        </button>
                     </div>
 
                     <!-- Main Action Buttons -->
@@ -106,6 +76,12 @@
                         </button>
                         <button class="btn btn-large btn-secondary main-action-btn" id="quizModeBtn">
                             <span class="icon">&#9201;</span> Quiz
+                        </button>
+                        <button class="btn btn-large btn-secondary main-action-btn" id="restartStudyBtn" style="display: none;">
+                            <span class="icon">&#8635;</span> Ricomincia
+                        </button>
+                        <button class="btn btn-large btn-secondary main-action-btn" id="resetStatsBtn" style="display: none;">
+                            <span class="icon">&#128200;</span> Reset Statistiche
                         </button>
                     </div>
 
@@ -378,13 +354,68 @@
                 </div>
                 <div class="form-group">
                     <label for="quizQuestionsCount">Numero di domande</label>
-                    <input type="number" id="quizQuestionsCount" min="1" max="100" value="20" placeholder="es. 20">
+                    <input type="number" id="quizQuestionsCount" min="1" max="100" value="30" placeholder="es. 30">
                     <small>Le domande saranno selezionate casualmente</small>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="cancelQuizBtn">Annulla</button>
                 <button class="btn btn-success" id="startQuizBtn">Inizia Quiz</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Management Modal -->
+    <div id="managementModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Gestione</h2>
+                <button class="close-btn" id="closeManagementModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="management-panel-grid">
+                    <button class="management-item" id="viewFlashcardsBtn" style="display: none;">
+                        <span class="management-icon">&#128203;</span>
+                        <span>Visualizza Flashcard</span>
+                    </button>
+                    <button class="management-item" id="regenerateFlashcardsBtn" style="display: none;">
+                        <span class="management-icon">&#128260;</span>
+                        <span>Genera Altre</span>
+                    </button>
+                    <button class="management-item" id="createFlashcardHubBtn">
+                        <span class="management-icon">&#10133;</span>
+                        <span>Crea Flashcard</span>
+                    </button>
+                    <button class="management-item" id="editWorkspaceBtn">
+                        <span class="management-icon">&#9998;</span>
+                        <span>Modifica Workspace</span>
+                    </button>
+                    <button class="management-item" id="deleteAllFlashcardsBtn" style="display: none;">
+                        <span class="management-icon">&#128465;</span>
+                        <span>Elimina Flashcard</span>
+                    </button>
+                    <button class="management-item management-item-danger" id="deleteWorkspaceBtn">
+                        <span class="management-icon">&#128465;</span>
+                        <span>Elimina Workspace</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm/Alert Dialog Modal -->
+    <div id="confirmDialog" class="modal">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h2 id="confirmDialogTitle">Conferma</h2>
+                <button class="close-btn" id="confirmDialogCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmDialogMessage" style="white-space: pre-line; line-height: 1.6;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="confirmDialogCancelBtn">Annulla</button>
+                <button class="btn btn-primary" id="confirmDialogConfirmBtn">Conferma</button>
             </div>
         </div>
     </div>

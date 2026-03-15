@@ -4,11 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FlashAI is an AI-powered flashcard generator that creates multiple-choice flashcards from uploaded documents (PDF, TXT, DOCX, MD). Built with Node.js/Express backend and vanilla JavaScript frontend, using OpenAI's GPT-4o-mini for flashcard generation.
+FlashAI is an AI-powered flashcard generator that creates multiple-choice flashcards from uploaded documents (PDF, TXT, DOCX, MD). Built with Node.js/Express backend and vanilla JavaScript frontend, using OpenAI's GPT-4o-mini for flashcard generation. Features SM-2 spaced repetition, statistics dashboard, and quiz simulation.
 
 ## Development Commands
 
-### Running the Application
 ```bash
 npm start              # Start production server on port 3000
 npm run dev            # Start with nodemon for auto-reload during development
@@ -16,105 +15,77 @@ npm run dev            # Start with nodemon for auto-reload during development
 
 ### Environment Setup
 - Copy `.env.example` to `.env` and add `OPENAI_API_KEY`
-- The app requires an OpenAI API key (not Anthropic, despite the documentation mentioning Claude)
+- Uses OpenAI API (not Anthropic) — requires `OPENAI_API_KEY` in `.env`
 - Default port is 3000 (configurable via `PORT` in `.env`)
 
 ## Architecture
 
-### Backend Structure (`backend/`)
+### Backend (`backend/`)
 
-**Main Server** (`server.js`):
-- Express server with JSON file-based storage (no database)
-- Two data files: `data/workspaces.json` and `data/flashcards.json`
-- Global `uploadProgress` Map tracks real-time generation progress per workspace
-- File uploads handled by multer, saved to `uploads/` directory (temporary, deleted after processing)
-- Progress polling endpoint: `GET /api/workspaces/:id/upload/progress` (polled every 1s by frontend)
+- **`server.js`**: Express server, JSON file-based storage (`data/workspaces.json`, `data/flashcards.json`), multer file uploads, in-memory `uploadProgress` Map, progress polling endpoint. Saves `documentText` on workspace for regeneration. Includes `/regenerate` endpoint with cross-deduplication (Jaccard similarity).
+- **`services/aiService.js`**: `generateFlashcardsFast()` splits text into ~3000 char chunks, generates 15-25 flashcards per batch. Uses `gpt-4o-mini` with `response_format: { type: "json_object" }`. Supports temperature override via `options` param (0.6 for regeneration vs 0.4 default).
+- **`services/fileProcessor.js`**: Text extraction for PDF (pdf-parse), DOCX (mammoth), TXT/MD. `extractText()` for simple, `extractTextWithSections()` for structured extraction.
 
-**AI Service** (`services/aiService.js`):
-- **Primary method**: `generateFlashcardsFast()` - splits document into ~3000 char chunks, generates 15-25 flashcards per batch
-- Uses OpenAI `gpt-4o-mini` model with `response_format: { type: "json_object" }` for reliable JSON parsing
-- Supports progress callbacks and cancellation via `shouldCancel()` function
-- Legacy methods: `generateFlashcards()` (backward compatibility), `generateFlashcardsProgressive()` (section-based)
+### Frontend (`frontend/`)
 
-**File Processor** (`services/fileProcessor.js`):
-- `extractText()`: Main entry point for simple text extraction
-- `extractTextWithSections()`: Returns structured data with sections/pages (used for progressive generation)
-- Supports: PDF (pdf-parse), DOCX (mammoth), TXT/MD (direct read)
-- `cleanText()`: Normalizes whitespace, removes control characters, limits consecutive newlines
-
-### Frontend Structure (`frontend/`)
-
-**State Management** (`app.js`):
-- Single global `state` object with nested structures:
-  - `workspaces`, `currentWorkspace`, `currentFlashcards`
-  - `uploadProgress`: tracks active uploads with real-time batch/flashcard counts
-  - `studyMode`: manages study session state (current index, correct/incorrect tracking)
-  - `quizMode`: timed quiz with hidden answers until completion
-  - `performance`: tracks correct/incorrect/correctFirstAttempt per workspace (localStorage persistence)
-
-**Key Features**:
-- **Study Mode**: Navigate flashcards, keyboard shortcuts (1-4 for answers, Enter to advance), excludes cards correct on first attempt
-- **Quiz Mode**: Timed mode, hides answers until quiz ends, auto-advances, shows summary at end
-- **Performance Tracking**: Per-workspace localStorage storage, tracks first-attempt correctness to hide mastered cards
-- **Real-time Progress**: 1-second polling during upload shows batch progress, flashcard count, estimated time remaining
+- **`app.js`**: Single global `state` object managing workspaces, flashcards, study/quiz modes, SRS data, and statistics. Key subsystems:
+  - **SM-2 Spaced Repetition**: Per-card ease factor, intervals, repetitions stored in `localStorage` (`srs_${workspaceId}`). Cards sorted by review priority. Quality mapping: 0=wrong, 3=corrected, 5=first-try correct.
+  - **Statistics Dashboard**: Tracks study/quiz sessions, card history, total time, streak, accuracy, improvement %, exam readiness score. Stored in `localStorage` (`stats_${workspaceId}`).
+  - **Custom Dialogs**: `showConfirmDialog()` / `showAlertDialog()` replace all native browser dialogs with themed modals.
+  - **Management Modal**: Gear icon opens modal overlay with workspace actions (view flashcards, generate more, create, edit, delete).
+- **`index.html`**: Main layout with sidebar, workspace view, study/quiz shared view. Modals for workspace edit, flashcard edit, quiz config, management, confirm dialogs.
+- **`styles.css`**: Dark minimal theme with CSS custom properties. Mobile-responsive.
 
 ### Data Flow
 
-1. **Upload**: File → multer → `fileProcessor.extractText()` → `aiService.generateFlashcardsFast()` → Save to `flashcards.json`
-2. **Progress**: Backend updates `uploadProgress` Map → Frontend polls every 1s → Updates UI with batch/flashcard counts
-3. **Cancellation**: Frontend sets `cancelled: true` → Backend checks `shouldCancel()` between batches → Returns partial flashcards
-4. **Study**: Load flashcards → Filter out `correctFirstAttempt` → Render with keyboard navigation → Update performance → Save to localStorage
+1. **Upload**: File → multer → `fileProcessor.extractText()` → save `documentText` on workspace → `aiService.generateFlashcardsFast()` → Save to `flashcards.json`
+2. **Regeneration**: `POST /regenerate` → read saved `documentText` → generate with temp 0.6 → cross-deduplicate vs existing → append new unique cards
+3. **Study**: Load flashcards → SRS filter (`isCardDueForReview`) → priority sort → render → update SRS on answer → record stats
+4. **Quiz**: Configure (default 30min/30 questions) → timed session → themed result dialog → record quiz session stats
 
-## Important Implementation Details
+## Key Implementation Details
 
-### API Key Configuration
-- Despite README mentioning Anthropic/Claude, the app **actually uses OpenAI** (`aiService.js:3-5`)
-- Requires `OPENAI_API_KEY` in `.env`, not `ANTHROPIC_API_KEY`
-- Uses `gpt-4o-mini` model for cost-effective flashcard generation
+### Flashcard Structure
+`{ id, workspaceId, question, options[4], correctAnswer (0-3), explanation }`
 
-### Flashcard Generation Strategy
-- Documents split into ~3000 character chunks for optimal balance of speed and quality
-- Each chunk targets 15-25 flashcards based on length (`chunk.length / 150`)
-- Batch processing with progress callbacks allows cancellation and partial saves
-- JSON response format enforced via OpenAI's `response_format` parameter (more reliable than prompt-only)
-
-### File Storage
-- No database - all data in JSON files under `data/`
-- Uploaded files temporarily stored in `uploads/`, deleted after text extraction
-- Workspaces have UUID identifiers, flashcards linked via `workspaceId` foreign key
-- Performance data stored in browser localStorage: `performance_${workspaceId}`
+### Storage
+- Server: JSON files under `data/`, uploaded files temp in `uploads/` (deleted after extraction)
+- Client: `performance_${id}`, `srs_${id}`, `stats_${id}` in localStorage
 
 ### Study Mode vs Quiz Mode
-- **Study Mode**: Immediate feedback, keyboard shortcuts, excludes mastered cards, includes Edit/Delete buttons
-- **Quiz Mode**: Timed, no feedback until end, auto-advance, shows final summary alert
-- Both share same rendering code (`renderStudyCard()`) with conditional logic based on `state.quizMode.active`
+- **Study**: Immediate feedback, keyboard shortcuts (1-4, Enter), SRS-filtered, edit/delete buttons
+- **Quiz**: Timed (default 30min), no feedback until end, themed result summary
+- Both share `renderStudyCard()` with conditional logic based on `state.quizMode.active`
 
-### Progress Tracking Implementation
-- Backend maintains in-memory Map (lost on restart - acceptable for temporary upload progress)
-- Frontend polls every 1 second during active uploads
-- Shows: batch number, total batches, flashcards generated, estimated time remaining
-- Cancel button sets `cancelled: true`, AI service checks between batches and saves partial results
+### SM-2 Algorithm
+- Tracks per-card: easeFactor (min 1.3), interval, repetitions, nextReview timestamp
+- Quality < 3 resets repetitions; quality >= 3 increases interval exponentially
+- Cards due for review: `nextReview <= now` or never reviewed
+
+### Statistics (Exam Readiness Formula)
+`(mastered*0.4 + accuracy*0.3 + coverage*0.2 + consistency*0.1) * 100`
 
 ## Common Development Tasks
 
 When adding flashcard generation features:
 - Modify `aiService.js` prompt structure (ultra-concise prompts work best with GPT-4o-mini)
-- Progress callbacks receive `{ currentBatch, totalBatches, flashcardsGenerated, flashcards }` object
-- Always validate flashcard structure: `{ question, options[4], correctAnswer (0-3), explanation }`
+- Progress callbacks receive `{ currentBatch, totalBatches, flashcardsGenerated, flashcards }`
+- Always validate flashcard structure
 
 When modifying study features:
 - Update `state.studyMode` or `state.quizMode` objects
-- Performance tracking requires both in-memory updates and `savePerformance()` call
-- Keyboard event handlers in `handleStudyModeKeyPress()` must check `state.studyMode.active`
+- SRS updates require `updateSRS(cardId, quality)` + `saveSRS()`
+- Stats require `recordCardAnswer()` / `recordStudySession()` / `recordQuizSession()` + `saveStats()`
+- Keyboard handlers in `handleStudyModeKeyPress()` must check `state.studyMode.active`
 
-When changing file processing:
-- Update supported extensions in both `server.js` (multer filter) and `fileProcessor.js`
-- New file types need extraction logic in `extractText()` switch statement
-- Consider section-based extraction for structured documents
+When adding UI dialogs:
+- Use `showConfirmDialog(title, msg, confirmText, cancelText, isDanger)` — returns `Promise<boolean>`
+- Use `showAlertDialog(title, msg, buttonText)` for info-only dialogs
+- Never use native `confirm()` or `alert()`
 
-## File Size and Performance Limits
+## Limits
 
-- Maximum file upload: 10MB (enforced by multer)
-- Chunk size: 3000 characters (balance between API calls and quality)
-- Progress polling: 1 second intervals (balance between responsiveness and server load)
-- PDF requirements: Must contain selectable text (not scanned images)
+- Max file upload: 200MB (multer)
+- Chunk size: 3000 chars
+- Progress polling: 1s intervals
+- PDF: Must contain selectable text (not scanned images)
